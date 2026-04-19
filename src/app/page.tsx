@@ -7,7 +7,8 @@ import type { ApiExercise } from "@/lib/exercise-api/types";
 
 const GITHUB_URL = "https://github.com/westvegh/nextjs-workout-tracker";
 const API_URL = "https://exerciseapi.dev";
-const FEATURED_FETCH_LIMIT = 100;
+const FEATURED_PAGE_SIZE = 100;
+const FEATURED_MAX_PAGES = 25;
 const FEATURED_CARDS = 8;
 
 const FEATURES = [
@@ -45,14 +46,25 @@ const SCHEMA_TREE = `auth.users (Supabase)
 
 async function loadFeaturedMovements(): Promise<ApiExercise[]> {
   if (!process.env.EXERCISEAPI_KEY) return [];
+  const found: ApiExercise[] = [];
   try {
-    const resp = await fetchExercises({ limit: FEATURED_FETCH_LIMIT });
-    return resp.data
-      .filter((ex) => Array.isArray(ex.videos) && ex.videos.length > 0)
-      .slice(0, FEATURED_CARDS);
+    for (let page = 0; page < FEATURED_MAX_PAGES; page++) {
+      const resp = await fetchExercises({
+        limit: FEATURED_PAGE_SIZE,
+        offset: page * FEATURED_PAGE_SIZE,
+      });
+      for (const ex of resp.data) {
+        if (Array.isArray(ex.videos) && ex.videos.length > 0) {
+          found.push(ex);
+          if (found.length >= FEATURED_CARDS) return found;
+        }
+      }
+      if (resp.data.length < FEATURED_PAGE_SIZE) break;
+    }
   } catch {
-    return [];
+    return found;
   }
+  return found;
 }
 
 export default async function Home() {
