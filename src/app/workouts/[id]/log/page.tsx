@@ -16,18 +16,14 @@ export default function WorkoutLogPage({ params }: { params: Params }) {
     !!process.env.NEXT_PUBLIC_SUPABASE_URL &&
     !!process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 
-  const [authLoaded, setAuthLoaded] = useState(false);
+  const [authLoaded, setAuthLoaded] = useState(!hasSupabaseEnv);
   const [userId, setUserId] = useState<string | null>(null);
   const [workout, setWorkout] = useState<WorkoutWithChildren | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!hasSupabaseEnv) {
-      setUserId(null);
-      setAuthLoaded(true);
-      return;
-    }
+    if (!hasSupabaseEnv) return;
     let cancelled = false;
     createClient()
       .auth.getUser()
@@ -38,7 +34,6 @@ export default function WorkoutLogPage({ params }: { params: Params }) {
       })
       .catch(() => {
         if (cancelled) return;
-        setUserId(null);
         setAuthLoaded(true);
       });
     return () => {
@@ -49,14 +44,13 @@ export default function WorkoutLogPage({ params }: { params: Params }) {
   useEffect(() => {
     if (!authLoaded) return;
     let cancelled = false;
-    setLoading(true);
-    setError(null);
     (async () => {
       try {
         const store = await getStore(userId);
         const row = await store.getWorkout(id);
         if (cancelled) return;
         setWorkout(row);
+        setError(null);
       } catch (err) {
         if (cancelled) return;
         setError(err instanceof Error ? err.message : "Failed to load workout");

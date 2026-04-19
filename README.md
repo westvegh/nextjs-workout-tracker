@@ -30,6 +30,7 @@ Fill in `.env.local`:
 
 - `EXERCISEAPI_KEY` — get one at [exerciseapi.dev/dashboard](https://exerciseapi.dev/dashboard)
 - `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_ANON_KEY` — from your [Supabase project](https://supabase.com)
+- `NEXT_PUBLIC_POSTHOG_KEY` and `NEXT_PUBLIC_POSTHOG_HOST` — optional; enables analytics for the demo. Leave blank to disable.
 
 Apply the database schema:
 

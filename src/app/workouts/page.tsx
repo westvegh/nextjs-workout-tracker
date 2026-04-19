@@ -28,20 +28,24 @@ export default function WorkoutsPage() {
     !!process.env.NEXT_PUBLIC_SUPABASE_URL &&
     !!process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 
-  const [authLoaded, setAuthLoaded] = useState(false);
+  const [authLoaded, setAuthLoaded] = useState(!hasSupabaseEnv);
   const [userId, setUserId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [workouts, setWorkouts] = useState<WorkoutRow[]>([]);
   const [error, setError] = useState<string | null>(null);
-  const [bannerDismissed, setBannerDismissed] = useState(true);
-
-  // Resolve auth state on mount.
-  useEffect(() => {
-    if (!hasSupabaseEnv) {
-      setUserId(null);
-      setAuthLoaded(true);
-      return;
+  const [bannerDismissed, setBannerDismissed] = useState<boolean>(() => {
+    if (typeof window === "undefined") return true;
+    try {
+      return window.localStorage.getItem(GUEST_BANNER_KEY) === "true";
+    } catch {
+      return false;
     }
+  });
+
+  // Resolve auth state on mount. Only runs when Supabase env is present;
+  // otherwise authLoaded is already true and userId stays null.
+  useEffect(() => {
+    if (!hasSupabaseEnv) return;
     const client = createClient();
     let cancelled = false;
     client.auth
@@ -53,7 +57,6 @@ export default function WorkoutsPage() {
       })
       .catch(() => {
         if (cancelled) return;
-        setUserId(null);
         setAuthLoaded(true);
       });
     return () => {
@@ -61,29 +64,17 @@ export default function WorkoutsPage() {
     };
   }, [hasSupabaseEnv]);
 
-  // Guest banner dismissed flag (only matters for anon users).
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    try {
-      const flag = window.localStorage.getItem(GUEST_BANNER_KEY);
-      setBannerDismissed(flag === "true");
-    } catch {
-      setBannerDismissed(false);
-    }
-  }, []);
-
   // Fetch workouts once auth is known.
   useEffect(() => {
     if (!authLoaded) return;
     let cancelled = false;
-    setLoading(true);
-    setError(null);
     (async () => {
       try {
         const store = await getStore(userId);
         const rows = await store.listWorkouts();
         if (cancelled) return;
         setWorkouts(rows as WorkoutRow[]);
+        setError(null);
       } catch (err) {
         if (cancelled) return;
         setError(err instanceof Error ? err.message : "Failed to load workouts");
