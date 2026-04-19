@@ -1,41 +1,35 @@
 "use client";
 
-import Link from "next/link";
+import { useEffect, useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { useEffect, useState, useTransition } from "react";
-import { ArrowLeft, Check, Plus, Trash2 } from "lucide-react";
-import { Badge } from "@/components/badge";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { QuickWeightButtons } from "@/components/quick-weight-buttons";
-import { RestTimerBanner } from "@/components/rest-timer-banner";
-import { SwipeDeleteRow } from "@/components/swipe-delete-row";
+import { CompletionScreen } from "@/components/completion-screen";
+import {
+  ExerciseCardLogger,
+  type CardExerciseState,
+} from "@/components/exercise-card-logger";
+import { FLASH_DURATION_MS, FlashBadge, type FlashState } from "@/components/flash-badge";
+import { RestSheet } from "@/components/rest-sheet";
+import { SessionHero } from "@/components/session-hero";
+import { SessionStickyBar } from "@/components/session-sticky-bar";
+import type { SetRowSetState } from "@/components/set-row";
+import { getExerciseHistory, type ExerciseHistory } from "@/lib/exercise-history";
+import { getStore } from "@/lib/workout-store";
 import {
   finishWorkout,
   upsertSets,
   type SetInput,
 } from "@/app/workouts/actions";
-import { getStore } from "@/lib/workout-store";
-import {
-  getLastPerformance,
-  type PreviousPerformance,
-} from "@/lib/previous-performance";
 
-interface SetState {
+const DEFAULT_REST_TARGET = 90;
+const ALL_DONE_DELAY_MS = 600;
+const MIN_REST_TARGET = 15;
+
+interface SetState extends SetRowSetState {
   id?: string;
-  set_number: number;
-  weight: string;
-  weight_unit: "lbs" | "kg";
-  reps: string;
-  is_completed: boolean;
 }
 
-interface ExerciseState {
-  id: string;
-  exercise_id: string;
-  exercise_name: string;
-  muscle: string | null;
-  equipment: string | null;
+interface ExerciseState extends CardExerciseState {
   sets: SetState[];
 }
 
@@ -97,6 +91,7 @@ export function WorkoutLogger({
         weight_unit: isValidUnit(s.weight_unit) ? s.weight_unit : "lbs",
         reps: s.reps != null ? String(s.reps) : "",
         is_completed: s.is_completed,
+        pr: false,
       })),
     }))
   );
@@ -104,55 +99,127 @@ export function WorkoutLogger({
   const [saved, setSaved] = useState(false);
   const [pending, startTransition] = useTransition();
   const [finishing, startFinish] = useTransition();
-  const [previous, setPrevious] = useState<
-    Record<string, PreviousPerformance | null>
-  >({});
-  // Rest timer: started_at epoch ms (or null when not running).
+  const [histories, setHistories] = useState<Record<string, ExerciseHistory | null>>({});
   const [restStartedAt, setRestStartedAt] = useState<number | null>(null);
-  // Finish-button celebration pulse.
-  const [celebrate, setCelebrate] = useState(false);
+  const [restTarget, setRestTarget] = useState<number>(DEFAULT_REST_TARGET);
+  const [flash, setFlash] = useState<FlashState | null>(null);
+  const [finished, setFinished] = useState(false);
+  // Captured when the logger transitions to `finished=true`. Used only by the
+  // completion screen's "Duration" stat — reading Date.now() during render
+  // violates React 19's purity rule.
+  const [finishedAt, setFinishedAt] = useState<number | null>(null);
 
-  // Look up previous-performance hints for each exercise on mount.
-  // Fire-and-forget; empty hints just skip rendering the placeholder.
+  // Session clock starts the moment the logger mounts. Client-side only (the
+  // workout schema doesn't carry started_at yet). useState initializer is the
+  // React-19-blessed way to capture a stable one-time timestamp — refs aren't
+  // allowed in render, and a constant would reset on every navigation.
+  const [startedAt] = useState<number>(() => Date.now());
+
+  // One-shot fetch of per-exercise history for Last/PR/sparkline. Uses the
+  // same store the logger writes against, so guest mode reads localStorage
+  // and signed-in mode hits the remote store.
   useEffect(() => {
     let cancelled = false;
     async function run() {
       try {
-        // getStore(null) -> LocalStore for anon, getStore(userId) -> RemoteStore
-        // for signed-in. isGuest === true means the page is rendering an anon
-        // workout so LocalStore is right; otherwise proxy via RemoteStore.
         const store = await getStore(isGuest ? null : userId);
         const unique = Array.from(
           new Set(
-            workout.workout_exercises
-              .map((e) => e.exercise_id)
-              .filter(Boolean)
+            workout.workout_exercises.map((e) => e.exercise_id).filter(Boolean)
           )
         );
-        const results: Record<string, PreviousPerformance | null> = {};
+        const results: Record<string, ExerciseHistory | null> = {};
         for (const exId of unique) {
           if (cancelled) return;
-          results[exId] = await getLastPerformance(store, exId);
+          results[exId] = await getExerciseHistory(store, exId);
         }
         if (cancelled) return;
-        setPrevious(results);
+        setHistories(results);
       } catch {
-        // Silent: ghost hints are a nice-to-have.
+        // Silent: history is a nice-to-have.
       }
     }
     run();
     return () => {
       cancelled = true;
     };
-    // Only run once per workout.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [workout.id]);
 
-  function updateSet(
-    exerciseId: string,
-    setIdx: number,
-    patch: Partial<SetState>
-  ) {
+  // Auto-clear the flash badge after its visual lifecycle. The badge's CSS
+  // animation leaves it at opacity 0; removing the state frees the live region.
+  useEffect(() => {
+    if (!flash) return;
+    const handle = window.setTimeout(() => setFlash(null), FLASH_DURATION_MS);
+    return () => window.clearTimeout(handle);
+  }, [flash]);
+
+  // When every set is complete, transition to the completion screen after a
+  // beat so the user sees the final check animate + flash before the page
+  // changes shape. Don't re-fire once the completion screen is showing.
+  useEffect(() => {
+    if (finished) return;
+    const total = exercises.reduce((n, ex) => n + ex.sets.length, 0);
+    const done = exercises.reduce(
+      (n, ex) => n + ex.sets.filter((s) => s.is_completed).length,
+      0
+    );
+    if (total > 0 && done === total) {
+      const handle = window.setTimeout(() => {
+        setRestStartedAt(null);
+        setFinishedAt(Date.now());
+        setFinished(true);
+      }, ALL_DONE_DELAY_MS);
+      return () => window.clearTimeout(handle);
+    }
+  }, [exercises, finished]);
+
+  // Derived: ordered list of (exerciseId, setIdx) for the first incomplete
+  // set globally, and the label for the one after it (used by RestSheet).
+  const derived = useMemo(() => {
+    let activeExerciseId: string | null = null;
+    let activeSetIdx: number | null = null;
+    let nextLabel: string | null = null;
+    let total = 0;
+    let done = 0;
+    let volume = 0;
+    let newPRs = 0;
+    const flat: Array<{ exerciseId: string; setIdx: number; setNumber: number; exerciseName: string }> = [];
+    for (const ex of exercises) {
+      for (let i = 0; i < ex.sets.length; i++) {
+        total++;
+        const s = ex.sets[i];
+        if (s.is_completed) {
+          done++;
+          const w = Number(s.weight) || 0;
+          const r = Number(s.reps) || 0;
+          volume += w * r;
+          if (s.pr) newPRs++;
+        }
+        flat.push({
+          exerciseId: ex.id,
+          setIdx: i,
+          setNumber: s.set_number,
+          exerciseName: ex.exercise_name,
+        });
+      }
+    }
+    for (let i = 0; i < flat.length; i++) {
+      const ex = exercises.find((e) => e.id === flat[i].exerciseId)!;
+      const s = ex.sets[flat[i].setIdx];
+      if (!s.is_completed && activeExerciseId === null) {
+        activeExerciseId = flat[i].exerciseId;
+        activeSetIdx = flat[i].setIdx;
+        if (i + 1 < flat.length) {
+          nextLabel = `${flat[i + 1].exerciseName} · Set ${flat[i + 1].setNumber}`;
+        }
+        break;
+      }
+    }
+    return { activeExerciseId, activeSetIdx, nextLabel, total, done, volume, newPRs };
+  }, [exercises]);
+
+  function updateSet(exerciseId: string, setIdx: number, patch: Partial<SetState>) {
     setSaved(false);
     setExercises((prev) =>
       prev.map((ex) => {
@@ -161,8 +228,8 @@ export function WorkoutLogger({
           ...ex,
           sets: ex.sets.map((s, i) => {
             if (i !== setIdx) return s;
-            // Rest-timer auto-dismiss: if an empty weight field gets its
-            // first character entered, the user is starting the next set.
+            // Starting a new set (first keystroke in an empty weight) cancels
+            // the rest timer — user is back at the bar.
             if (
               patch.weight !== undefined &&
               s.weight.trim() === "" &&
@@ -180,72 +247,71 @@ export function WorkoutLogger({
 
   function toggleComplete(exerciseId: string, setIdx: number) {
     setSaved(false);
-    let justCompleted = false;
+    // Compute wasPR + flash details BEFORE setExercises so the closure-
+    // captured values are stable. React StrictMode double-invokes the updater
+    // callback; reading these inside that callback is unreliable.
+    const ex = exercises.find((e) => e.id === exerciseId);
+    if (!ex) return;
+    const s = ex.sets[setIdx];
+    if (!s) return;
+    const willBeCompleted = !s.is_completed;
+    const history = histories[ex.exercise_id] ?? null;
+
+    let autoWeight = s.weight;
+    let autoReps = s.reps;
+    if (willBeCompleted && history?.last) {
+      if (autoWeight.trim() === "") autoWeight = String(history.last.weight);
+      if (autoReps.trim() === "") autoReps = String(history.last.reps);
+    }
+
+    let wasPR = false;
+    if (willBeCompleted) {
+      const w = Number(autoWeight) || 0;
+      const r = Number(autoReps) || 0;
+      if (history?.pr) {
+        wasPR = w * r > history.pr.weight * history.pr.reps;
+      } else {
+        wasPR = w > 0 && r > 0;
+      }
+    }
+
     setExercises((prev) =>
-      prev.map((ex) => {
-        if (ex.id !== exerciseId) return ex;
+      prev.map((exItem) => {
+        if (exItem.id !== exerciseId) return exItem;
         return {
-          ...ex,
-          sets: ex.sets.map((s, i) => {
-            if (i !== setIdx) return s;
-            const next = !s.is_completed;
-            if (next) justCompleted = true;
-            return { ...s, is_completed: next };
+          ...exItem,
+          sets: exItem.sets.map((setItem, i) => {
+            if (i !== setIdx) return setItem;
+            return {
+              ...setItem,
+              is_completed: willBeCompleted,
+              weight: willBeCompleted ? autoWeight : setItem.weight,
+              reps: willBeCompleted ? autoReps : setItem.reps,
+              pr: willBeCompleted ? wasPR : false,
+            };
           }),
         };
       })
     );
-    if (justCompleted) {
-      // Side effects queued into a microtask — the purity linter treats the
-      // body of toggleComplete as a potential render path and flags Date.now()
-      // / navigator.vibrate. They only run in event-handler context, but
-      // scheduling onto a microtask documents that and keeps the linter happy.
+
+    if (willBeCompleted) {
       queueMicrotask(() => {
         setRestStartedAt(Date.now());
+        setRestTarget(DEFAULT_REST_TARGET);
+        setFlash({
+          text: wasPR ? "New PR logged" : "Set logged",
+          subtext: `Rest · ${DEFAULT_REST_TARGET}s`,
+          isPR: wasPR,
+          ts: Date.now(),
+        });
         if (typeof navigator !== "undefined" && "vibrate" in navigator) {
           try {
-            navigator.vibrate(30);
+            navigator.vibrate(wasPR ? [20, 40, 30] : 30);
           } catch {
-            // Some mobile browsers gate vibrate behind engagement; ignore.
+            // Some browsers gate vibrate behind a user gesture signal; ignore.
           }
         }
       });
-      // Small delay so the "checked" animation lands first, then glide to
-      // the next incomplete set (same exercise first, then downstream).
-      setTimeout(() => scrollToNextIncomplete(exerciseId, setIdx), 100);
-    }
-  }
-
-  function scrollToNextIncomplete(fromExerciseId: string, fromSetIdx: number) {
-    if (typeof document === "undefined") return;
-    const exIdx = exercises.findIndex((ex) => ex.id === fromExerciseId);
-    if (exIdx < 0) return;
-
-    // Look in the current exercise first, starting from the next set.
-    for (let j = fromSetIdx + 1; j < exercises[exIdx].sets.length; j++) {
-      if (!exercises[exIdx].sets[j].is_completed) {
-        const el = document.querySelector<HTMLElement>(
-          `[data-set-row='${fromExerciseId}:${j}']`
-        );
-        if (el) {
-          el.scrollIntoView({ behavior: "smooth", block: "center" });
-          return;
-        }
-      }
-    }
-    // Then look in later exercises.
-    for (let i = exIdx + 1; i < exercises.length; i++) {
-      for (let j = 0; j < exercises[i].sets.length; j++) {
-        if (!exercises[i].sets[j].is_completed) {
-          const el = document.querySelector<HTMLElement>(
-            `[data-set-row='${exercises[i].id}:${j}']`
-          );
-          if (el) {
-            el.scrollIntoView({ behavior: "smooth", block: "center" });
-            return;
-          }
-        }
-      }
     }
   }
 
@@ -264,6 +330,7 @@ export function WorkoutLogger({
                   weight_unit: ex.sets.at(-1)?.weight_unit ?? "lbs",
                   reps: "",
                   is_completed: false,
+                  pr: false,
                 },
               ],
             }
@@ -326,214 +393,103 @@ export function WorkoutLogger({
 
   function handleFinish() {
     setError(null);
-    // Pulse the button for a brief 300ms before the redirect so the user feels
-    // something happened. The celebration flag is a pure CSS hook — no confetti.
-    setCelebrate(true);
     startFinish(async () => {
       try {
-        // Wait the pulse out in parallel with the save so we never stretch the
-        // overall finish latency beyond what the network would already cost.
-        const delay = new Promise((resolve) => setTimeout(resolve, 300));
         if (isGuest) {
           const store = await getStore(null);
-          await Promise.all([
-            (async () => {
-              await store.upsertSets(workout.id, buildPayload());
-              await store.setWorkoutStatus(workout.id, "completed");
-            })(),
-            delay,
-          ]);
+          await store.upsertSets(workout.id, buildPayload());
+          await store.setWorkoutStatus(workout.id, "completed");
           router.push(`/workouts/${workout.id}`);
           router.refresh();
         } else {
-          await Promise.all([
-            (async () => {
-              await upsertSets(workout.id, buildPayload());
-              await finishWorkout(workout.id);
-            })(),
-            delay,
-          ]);
+          await upsertSets(workout.id, buildPayload());
+          await finishWorkout(workout.id);
         }
       } catch (err) {
-        // redirect() inside server action throws a special error — don't trap that as failure.
         if (err instanceof Error && err.message.toLowerCase().includes("next_redirect")) {
           return;
         }
         setError(err instanceof Error ? err.message : "Finish failed");
-      } finally {
-        setCelebrate(false);
       }
     });
   }
 
+  function adjustRest(deltaSeconds: number) {
+    setRestTarget((target) => Math.max(MIN_REST_TARGET, target + deltaSeconds));
+  }
+
+  const workoutName = workout.name || "Unnamed workout";
+  const durationMinutes =
+    finishedAt != null
+      ? Math.max(0, Math.floor((finishedAt - startedAt) / 60000))
+      : 0;
+
+  if (finished) {
+    return (
+      <main className="mx-auto w-full max-w-2xl flex-1 px-4 pb-24 sm:px-6">
+        <CompletionScreen
+          workoutName={workoutName}
+          durationMinutes={durationMinutes}
+          totalVolume={derived.volume}
+          setsDone={derived.done}
+          newPRs={derived.newPRs}
+          exercises={exercises.map((ex) => ({
+            id: ex.id,
+            name: ex.exercise_name,
+            sets: ex.sets
+              .filter((s) => s.is_completed)
+              .map((s) => ({
+                weight: s.weight || "0",
+                reps: s.reps || "0",
+                weight_unit: s.weight_unit,
+              })),
+            volume: ex.sets
+              .filter((s) => s.is_completed)
+              .reduce(
+                (sum, s) => sum + (Number(s.weight) || 0) * (Number(s.reps) || 0),
+                0
+              ),
+          }))}
+          onFinish={handleFinish}
+          finishing={finishing}
+        />
+      </main>
+    );
+  }
+
   return (
-    <main className="mx-auto w-full max-w-2xl flex-1 px-4 py-8 sm:px-6 sm:py-10">
-      <Link
-        href={`/workouts/${workout.id}`}
-        className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
-      >
-        <ArrowLeft className="h-4 w-4" />
-        Back to workout
-      </Link>
+    <main className="mx-auto w-full max-w-2xl flex-1 px-4 pb-32 sm:px-6">
+      <SessionStickyBar
+        startedAt={startedAt}
+        workoutName={workoutName}
+        done={derived.done}
+        total={derived.total}
+      />
+      <SessionHero
+        workoutId={workout.id}
+        workoutName={workoutName}
+        date={workout.date}
+        setsDone={derived.done}
+        setsTotal={derived.total}
+        volume={derived.volume}
+      />
 
-      <h1 className="mt-6 text-3xl font-semibold tracking-tight">
-        {workout.name || "Unnamed workout"}
-      </h1>
-      <p className="mt-1 text-sm text-muted-foreground">
-        Log your sets. Tap done when you hit a set.
-      </p>
-
-      <div className="mt-10 space-y-6">
-        {exercises.map((ex) => {
-          const last = previous[ex.exercise_id];
-          const weightPlaceholder = last ? String(last.weight) : "Weight";
-          const repsPlaceholder = last ? String(last.reps) : "Reps";
-          return (
-            <div key={ex.id} className="rounded-lg border bg-card">
-              <div className="flex flex-wrap items-start justify-between gap-2 border-b p-5">
-                <div>
-                  <div className="font-medium">{ex.exercise_name}</div>
-                  <div className="mt-1.5 flex flex-wrap gap-1.5">
-                    {ex.muscle ? (
-                      <Badge variant="default">{ex.muscle}</Badge>
-                    ) : null}
-                    {ex.equipment ? (
-                      <Badge variant="outline">{ex.equipment}</Badge>
-                    ) : null}
-                  </div>
-                  {last ? (
-                    <p className="mt-2 text-xs text-muted-foreground">
-                      Last: {last.weight} x {last.reps}
-                    </p>
-                  ) : null}
-                </div>
-              </div>
-
-              {ex.sets.length === 0 ? (
-                <div className="p-5 text-center text-sm text-muted-foreground">
-                  No sets yet.
-                </div>
-              ) : (
-                <ul className="divide-y">
-                  {ex.sets.map((s, idx) => {
-                    const emptyWeight = s.weight.trim() === "";
-                    const emptyReps = s.reps.trim() === "";
-                    return (
-                      <li
-                        key={s.id ?? `new-${idx}`}
-                        data-set-row={`${ex.id}:${idx}`}
-                      >
-                        <SwipeDeleteRow onDelete={() => removeSet(ex.id, idx)}>
-                        <div className="flex flex-col gap-2 px-4 py-3">
-                        <div className="grid grid-cols-[auto_1fr_auto_1fr_auto_auto] items-center gap-2 sm:grid-cols-[auto_120px_80px_120px_auto_auto]">
-                          <span className="w-8 text-sm text-muted-foreground">
-                            #{s.set_number}
-                          </span>
-                          <Input
-                            type="number"
-                            inputMode="decimal"
-                            step="0.5"
-                            min="0"
-                            placeholder={weightPlaceholder}
-                            value={s.weight}
-                            onClick={() => {
-                              if (emptyWeight && last) {
-                                updateSet(ex.id, idx, {
-                                  weight: String(last.weight),
-                                });
-                              }
-                            }}
-                            onChange={(event) =>
-                              updateSet(ex.id, idx, {
-                                weight: event.target.value,
-                              })
-                            }
-                            aria-label={`Weight, set ${s.set_number}`}
-                            className="h-9"
-                          />
-                          <button
-                            type="button"
-                            onClick={() =>
-                              updateSet(ex.id, idx, {
-                                weight_unit:
-                                  s.weight_unit === "lbs" ? "kg" : "lbs",
-                              })
-                            }
-                            className="h-9 rounded-md border border-input bg-transparent px-2 text-xs font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-                            aria-label="Toggle weight unit"
-                          >
-                            {s.weight_unit}
-                          </button>
-                          <Input
-                            type="number"
-                            inputMode="numeric"
-                            min="0"
-                            placeholder={repsPlaceholder}
-                            value={s.reps}
-                            onClick={() => {
-                              if (emptyReps && last) {
-                                updateSet(ex.id, idx, {
-                                  reps: String(last.reps),
-                                });
-                              }
-                            }}
-                            onChange={(event) =>
-                              updateSet(ex.id, idx, { reps: event.target.value })
-                            }
-                            aria-label={`Reps, set ${s.set_number}`}
-                            className="h-9"
-                          />
-                          <Button
-                            type="button"
-                            variant={s.is_completed ? "default" : "outline"}
-                            size="icon"
-                            onClick={() => toggleComplete(ex.id, idx)}
-                            aria-label={
-                              s.is_completed ? "Mark incomplete" : "Mark done"
-                            }
-                          >
-                            <Check className="h-4 w-4" />
-                          </Button>
-                          <Button
-                            type="button"
-                            variant="ghost"
-                            size="icon"
-                            onClick={() => removeSet(ex.id, idx)}
-                            aria-label="Remove set"
-                          >
-                            <Trash2 className="h-4 w-4" />
-                          </Button>
-                        </div>
-                        <QuickWeightButtons
-                          value={s.weight}
-                          onChange={(next) =>
-                            updateSet(ex.id, idx, { weight: next })
-                          }
-                          disabled={s.is_completed}
-                          className="pl-10 sm:pl-10"
-                        />
-                        </div>
-                        </SwipeDeleteRow>
-                      </li>
-                    );
-                  })}
-                </ul>
-              )}
-
-              <div className="border-t p-3">
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => addSet(ex.id)}
-                >
-                  <Plus className="h-4 w-4" />
-                  Add set
-                </Button>
-              </div>
-            </div>
-          );
-        })}
+      <div className="mt-6 space-y-3">
+        {exercises.map((ex, i) => (
+          <ExerciseCardLogger
+            key={ex.id}
+            exercise={ex}
+            orderIndex={i}
+            history={histories[ex.exercise_id] ?? null}
+            activeSetIdx={
+              derived.activeExerciseId === ex.id ? derived.activeSetIdx : null
+            }
+            onUpdateSet={(setIdx, patch) => updateSet(ex.id, setIdx, patch)}
+            onToggleSet={(setIdx) => toggleComplete(ex.id, setIdx)}
+            onRemoveSet={(setIdx) => removeSet(ex.id, setIdx)}
+            onAddSet={() => addSet(ex.id)}
+          />
+        ))}
       </div>
 
       {error ? (
@@ -544,13 +500,18 @@ export function WorkoutLogger({
       ) : null}
 
       {restStartedAt !== null ? (
-        <RestTimerBanner
+        <RestSheet
           startedAt={restStartedAt}
-          onDismiss={() => setRestStartedAt(null)}
+          target={restTarget}
+          nextLabel={derived.nextLabel}
+          onSkip={() => setRestStartedAt(null)}
+          onAdjust={adjustRest}
         />
       ) : null}
 
-      <div className="sticky bottom-4 mt-4 flex flex-wrap justify-end gap-3 rounded-lg border bg-background/90 p-3 backdrop-blur">
+      <FlashBadge flash={flash} />
+
+      <div className="fixed inset-x-4 bottom-4 z-10 mx-auto flex max-w-2xl flex-wrap justify-end gap-3 rounded-xl border bg-background/90 p-3 backdrop-blur sm:inset-x-6">
         <Button
           variant="outline"
           onClick={handleSave}
@@ -561,10 +522,7 @@ export function WorkoutLogger({
         <Button
           onClick={handleFinish}
           disabled={pending || finishing}
-          className={
-            "transition-transform duration-300 " +
-            (celebrate ? "scale-105 opacity-90" : "")
-          }
+          className="bg-brand text-brand-foreground hover:brightness-110"
         >
           {finishing ? "Finishing..." : "Finish workout"}
         </Button>
