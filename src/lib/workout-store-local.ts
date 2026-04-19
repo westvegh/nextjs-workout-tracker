@@ -31,6 +31,17 @@ import { EXAMPLE_WORKOUTS } from "@/data/example-workouts";
 
 export const STORAGE_KEY = "wt_workouts_v1";
 export const SEEDED_FLAG_KEY = "wt_seeded_v1";
+// Bump this when adding a new entry to EXERCISE_ID_MIGRATIONS so existing
+// localStorage data picks up the rename on the user's next page load.
+const EXERCISE_ID_MIGRATION_FLAG = "wt_mig_exids_v1";
+// Map of legacy seed exercise_ids → the matching exerciseapi.dev catalog
+// id. Existing local workouts have these baked in; without a migration the
+// demo video pill 404s for them.
+const EXERCISE_ID_MIGRATIONS: Record<string, string> = {
+  Barbell_Bench_Press_Medium_Grip: "Barbell_Bench_Press_-_Medium_Grip",
+  A_Skip: "A-Skip",
+  Hip_External_Rotation_RAILs: "90_90_Hip_External_Rotation_RAILs",
+};
 export const STORAGE_VERSION = 1 as const;
 
 export interface ImportFailure {
@@ -132,6 +143,59 @@ export class LocalStore implements WorkoutStore {
       const probe = probeStorage();
       this.storage = probe.storage;
       this.storageDisabled = probe.disabled;
+    }
+    if (!this.storageDisabled) this.runExerciseIdMigration();
+  }
+
+  /**
+   * Rewrite legacy seed exercise_ids in place so the workout-logger's lazy
+   * demo lookup against /api/exercise-detail/[id] finds the right entry.
+   * Idempotent — keyed off EXERCISE_ID_MIGRATION_FLAG so it only walks the
+   * state once per user.
+   *
+   * Reads + parses the raw storage value here rather than calling readState
+   * because readState clears storage on parse/version mismatch. The
+   * migration must be a true no-op if the state is unhealthy — corrupted-
+   * state recovery is the regular read path's job, not ours.
+   */
+  private runExerciseIdMigration(): void {
+    try {
+      if (this.storage.getItem(EXERCISE_ID_MIGRATION_FLAG) === "true") return;
+      const raw = this.storage.getItem(STORAGE_KEY);
+      if (raw === null) {
+        this.storage.setItem(EXERCISE_ID_MIGRATION_FLAG, "true");
+        return;
+      }
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(raw);
+      } catch {
+        return;
+      }
+      if (
+        !parsed ||
+        typeof parsed !== "object" ||
+        (parsed as { version?: unknown }).version !== STORAGE_VERSION
+      ) {
+        return;
+      }
+      const state = parsed as StorageShape;
+      if (!Array.isArray(state.exercises)) return;
+      let dirty = false;
+      const migrated = state.exercises.map((ex) => {
+        const next = EXERCISE_ID_MIGRATIONS[ex.exercise_id];
+        if (next && next !== ex.exercise_id) {
+          dirty = true;
+          return { ...ex, exercise_id: next };
+        }
+        return ex;
+      });
+      if (dirty) {
+        this.writeState({ ...state, exercises: migrated });
+      }
+      this.storage.setItem(EXERCISE_ID_MIGRATION_FLAG, "true");
+    } catch {
+      // Best-effort. Try again on next page load.
     }
   }
 

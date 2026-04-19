@@ -34,7 +34,7 @@ export const EXAMPLE_WORKOUTS: ExampleWorkout[] = [
     date: EXAMPLE_SEED_DATE,
     exercises: [
       {
-        exercise_id: "Barbell_Bench_Press_Medium_Grip",
+        exercise_id: "Barbell_Bench_Press_-_Medium_Grip",
         exercise_name: "Barbell Bench Press (Medium Grip)",
         muscle: "chest",
         equipment: "barbell",
@@ -111,7 +111,7 @@ export const EXAMPLE_WORKOUTS: ExampleWorkout[] = [
         default_sets: 2,
       },
       {
-        exercise_id: "A_Skip",
+        exercise_id: "A-Skip",
         exercise_name: "A-Skip",
         muscle: "full body",
         equipment: "body only",
@@ -125,7 +125,7 @@ export const EXAMPLE_WORKOUTS: ExampleWorkout[] = [
         default_sets: 2,
       },
       {
-        exercise_id: "Hip_External_Rotation_RAILs",
+        exercise_id: "90_90_Hip_External_Rotation_RAILs",
         exercise_name: "Hip External Rotation RAILs",
         muscle: "hips",
         equipment: "body only",
