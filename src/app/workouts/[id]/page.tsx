@@ -1,42 +1,17 @@
+"use client";
+
 import Link from "next/link";
-import { notFound } from "next/navigation";
+import { use, useEffect, useState } from "react";
 import { ArrowLeft } from "lucide-react";
-import { createClient } from "@/lib/supabase/server";
+import { createClient } from "@/lib/supabase/client";
 import { Badge } from "@/components/badge";
 import { Button } from "@/components/ui/button";
 import { StatusBadge } from "@/components/status-badge";
 import { DeleteWorkoutButton } from "@/components/delete-workout-button";
 import { StartWorkoutButton } from "@/components/start-workout-button";
+import { getStore, type WorkoutWithChildren } from "@/lib/workout-store";
 
 type Params = Promise<{ id: string }>;
-
-interface SetRow {
-  id: string;
-  set_number: number;
-  weight: number | null;
-  weight_unit: string | null;
-  reps: number | null;
-  is_completed: boolean;
-}
-
-interface WorkoutExerciseRow {
-  id: string;
-  exercise_id: string;
-  exercise_name: string;
-  muscle: string | null;
-  equipment: string | null;
-  order_index: number;
-  exercise_sets: SetRow[];
-}
-
-interface WorkoutRow {
-  id: string;
-  name: string | null;
-  date: string;
-  status: string | null;
-  notes: string | null;
-  workout_exercises: WorkoutExerciseRow[];
-}
 
 function formatDate(iso: string): string {
   const d = new Date(`${iso}T00:00:00Z`);
@@ -49,62 +24,91 @@ function formatDate(iso: string): string {
   });
 }
 
-export default async function WorkoutDetailPage({
-  params,
-}: {
-  params: Params;
-}) {
-  const { id } = await params;
-  const supabase = await createClient();
+export default function WorkoutDetailPage({ params }: { params: Params }) {
+  const { id } = use(params);
 
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) {
+  const hasSupabaseEnv =
+    !!process.env.NEXT_PUBLIC_SUPABASE_URL &&
+    !!process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+
+  const [authLoaded, setAuthLoaded] = useState(!hasSupabaseEnv);
+  const [userId, setUserId] = useState<string | null>(null);
+  const [workout, setWorkout] = useState<WorkoutWithChildren | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!hasSupabaseEnv) return;
+    let cancelled = false;
+    createClient()
+      .auth.getUser()
+      .then(({ data }) => {
+        if (cancelled) return;
+        setUserId(data.user?.id ?? null);
+        setAuthLoaded(true);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setAuthLoaded(true);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [hasSupabaseEnv]);
+
+  useEffect(() => {
+    if (!authLoaded) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const store = await getStore(userId);
+        const row = await store.getWorkout(id);
+        if (cancelled) return;
+        setWorkout(row);
+        setError(null);
+      } catch (err) {
+        if (cancelled) return;
+        setError(err instanceof Error ? err.message : "Failed to load workout");
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [authLoaded, userId, id]);
+
+  if (loading) {
     return (
-      <main className="mx-auto w-full max-w-3xl flex-1 px-6 py-24 text-center">
-        <h1 className="text-2xl font-semibold tracking-tight">Sign in</h1>
-        <p className="mt-2 text-muted-foreground">
-          Sign in to view this workout.
-        </p>
-        <Button asChild className="mt-6">
-          <Link href="/auth/signin">Sign in</Link>
-        </Button>
+      <main className="mx-auto w-full max-w-3xl flex-1 px-6 py-24 text-center text-sm text-muted-foreground">
+        Loading workout…
       </main>
     );
   }
-
-  const { data, error } = await supabase
-    .from("workouts")
-    .select(
-      `
-      id, name, date, status, notes,
-      workout_exercises(
-        id, exercise_id, exercise_name, muscle, equipment, order_index,
-        exercise_sets(id, set_number, weight, weight_unit, reps, is_completed)
-      )
-      `
-    )
-    .eq("id", id)
-    .order("order_index", { referencedTable: "workout_exercises" })
-    .order("set_number", {
-      referencedTable: "workout_exercises.exercise_sets",
-    })
-    .maybeSingle();
 
   if (error) {
     return (
       <main className="mx-auto w-full max-w-3xl flex-1 px-6 py-12">
         <div className="rounded-lg border border-destructive/30 bg-destructive/5 p-6 text-sm text-destructive">
-          {error.message}
+          {error}
         </div>
       </main>
     );
   }
 
-  if (!data) notFound();
-
-  const workout = data as unknown as WorkoutRow;
+  if (!workout) {
+    return (
+      <main className="mx-auto w-full max-w-3xl flex-1 px-6 py-24 text-center">
+        <h1 className="text-2xl font-semibold tracking-tight">Workout not found</h1>
+        <p className="mt-2 text-muted-foreground">
+          That workout doesn&apos;t exist on this device.
+        </p>
+        <Button asChild className="mt-6">
+          <Link href="/workouts">All workouts</Link>
+        </Button>
+      </main>
+    );
+  }
 
   return (
     <main className="mx-auto w-full max-w-3xl flex-1 px-6 py-10">
@@ -130,7 +134,7 @@ export default async function WorkoutDetailPage({
         </div>
         <div className="flex items-center gap-2">
           {workout.status === "planned" ? (
-            <StartWorkoutButton workoutId={workout.id} />
+            <StartWorkoutButton workoutId={workout.id} isGuest={!userId} />
           ) : workout.status === "in_progress" ? (
             <Button asChild>
               <Link href={`/workouts/${workout.id}/log`}>Continue logging</Link>
@@ -140,7 +144,7 @@ export default async function WorkoutDetailPage({
               <Link href={`/workouts/${workout.id}/log`}>Edit log</Link>
             </Button>
           )}
-          <DeleteWorkoutButton workoutId={workout.id} />
+          <DeleteWorkoutButton workoutId={workout.id} isGuest={!userId} />
         </div>
       </div>
 
@@ -150,7 +154,7 @@ export default async function WorkoutDetailPage({
         </p>
       ) : null}
 
-      {workout.workout_exercises.length === 0 ? (
+      {workout.exercises.length === 0 ? (
         <div className="mt-10 rounded-lg border border-dashed p-10 text-center">
           <p className="text-sm text-muted-foreground">
             No exercises on this workout.
@@ -158,7 +162,7 @@ export default async function WorkoutDetailPage({
         </div>
       ) : (
         <ul className="mt-10 space-y-4">
-          {workout.workout_exercises.map((ex) => (
+          {workout.exercises.map((ex) => (
             <li key={ex.id} className="rounded-lg border bg-card">
               <div className="flex flex-wrap items-start justify-between gap-3 border-b p-5">
                 <div>
@@ -178,13 +182,12 @@ export default async function WorkoutDetailPage({
                   </div>
                 </div>
                 <span className="text-xs text-muted-foreground">
-                  {ex.exercise_sets.length} set
-                  {ex.exercise_sets.length === 1 ? "" : "s"}
+                  {ex.sets.length} set{ex.sets.length === 1 ? "" : "s"}
                 </span>
               </div>
-              {ex.exercise_sets.length > 0 ? (
+              {ex.sets.length > 0 ? (
                 <ul className="divide-y">
-                  {ex.exercise_sets.map((set) => (
+                  {ex.sets.map((set) => (
                     <li
                       key={set.id}
                       className="flex items-center justify-between gap-3 px-5 py-3 text-sm"

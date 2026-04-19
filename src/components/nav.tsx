@@ -1,9 +1,8 @@
 import Link from "next/link";
-import { Button } from "@/components/ui/button";
 import { UserMenu } from "@/components/user-menu";
+import { NavCta } from "@/components/nav-cta";
+import { ThemeToggle } from "@/components/theme-toggle";
 import { createClient } from "@/lib/supabase/server";
-
-const GITHUB_URL = "https://github.com/westvegh/nextjs-workout-tracker";
 
 export async function Nav() {
   let email: string | null = null;
@@ -17,46 +16,38 @@ export async function Nav() {
     email = null;
   }
 
+  const isSignedIn = !!email;
+
   return (
     <header className="sticky top-0 z-40 border-b bg-background/80 backdrop-blur">
       <div className="mx-auto flex h-14 max-w-6xl items-center justify-between gap-4 px-6">
-        <Link
-          href="/"
-          className="font-semibold tracking-tight hover:opacity-80"
-        >
-          workout.next
-        </Link>
-        <nav className="flex items-center gap-1 text-sm">
+        <div className="flex items-center gap-6">
           <Link
-            href="/exercises"
-            className="rounded-md px-3 py-1.5 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+            href="/"
+            className="font-semibold tracking-tight hover:opacity-80"
           >
-            Exercises
+            Next.js Workout Tracker
           </Link>
-          <Link
-            href="/workouts"
-            className="rounded-md px-3 py-1.5 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-          >
-            Workouts
-          </Link>
-          <a
-            href={GITHUB_URL}
-            target="_blank"
-            rel="noreferrer"
-            className="rounded-md px-3 py-1.5 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-          >
-            GitHub
-          </a>
-          <div className="ml-2">
-            {email ? (
-              <UserMenu email={email} />
-            ) : (
-              <Button asChild size="sm" variant="outline">
-                <Link href="/auth/signin">Sign in</Link>
-              </Button>
-            )}
-          </div>
-        </nav>
+          <nav className="hidden items-center gap-1 text-sm sm:flex">
+            <Link
+              href="/exercises"
+              className="rounded-md px-3 py-1.5 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+            >
+              Exercises
+            </Link>
+            <Link
+              href="/workouts"
+              className="rounded-md px-3 py-1.5 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+            >
+              Workouts
+            </Link>
+          </nav>
+        </div>
+        <div className="flex items-center gap-2">
+          <NavCta isSignedIn={isSignedIn} />
+          <ThemeToggle />
+          {email ? <UserMenu email={email} /> : null}
+        </div>
       </div>
     </header>
   );

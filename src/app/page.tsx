@@ -1,9 +1,15 @@
 import Link from "next/link";
 import { ArrowRight, Database, Lock, PlayCircle, Sparkles } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { FeaturedMovementCard } from "@/components/featured-movement-card";
+import { fetchExercises } from "@/lib/exercise-api/client";
+import type { ApiExercise } from "@/lib/exercise-api/types";
 
 const GITHUB_URL = "https://github.com/westvegh/nextjs-workout-tracker";
 const API_URL = "https://exerciseapi.dev";
+const FEATURED_PAGE_SIZE = 100;
+const FEATURED_MAX_PAGES = 25;
+const FEATURED_CARDS = 8;
 
 const FEATURES = [
   {
@@ -38,7 +44,32 @@ const SCHEMA_TREE = `auth.users (Supabase)
                   |
                   +-- exercise_sets (set_number, weight, weight_unit, reps, is_completed)`;
 
-export default function Home() {
+async function loadFeaturedMovements(): Promise<ApiExercise[]> {
+  if (!process.env.EXERCISEAPI_KEY) return [];
+  const found: ApiExercise[] = [];
+  try {
+    for (let page = 0; page < FEATURED_MAX_PAGES; page++) {
+      const resp = await fetchExercises({
+        limit: FEATURED_PAGE_SIZE,
+        offset: page * FEATURED_PAGE_SIZE,
+      });
+      for (const ex of resp.data) {
+        if (Array.isArray(ex.videos) && ex.videos.length > 0) {
+          found.push(ex);
+          if (found.length >= FEATURED_CARDS) return found;
+        }
+      }
+      if (resp.data.length < FEATURED_PAGE_SIZE) break;
+    }
+  } catch {
+    return found;
+  }
+  return found;
+}
+
+export default async function Home() {
+  const featured = await loadFeaturedMovements();
+
   return (
     <main className="flex-1">
       <section className="border-b">
@@ -79,6 +110,42 @@ export default function Home() {
         </div>
       </section>
 
+      {featured.length > 0 ? (
+        <section className="border-b">
+          <div className="mx-auto max-w-6xl px-6 py-20">
+            <div className="flex flex-wrap items-end justify-between gap-3">
+              <div>
+                <h2 className="text-2xl font-semibold tracking-tight sm:text-3xl">
+                  See it in action
+                </h2>
+                <p className="mt-2 max-w-2xl text-sm text-muted-foreground">
+                  A sample of the video-backed exercises in the catalog. Hover
+                  to preview, click to see the full detail page.
+                </p>
+              </div>
+              <Button asChild variant="ghost" size="sm">
+                <Link href="/exercises?videos=1">
+                  Browse all videos
+                  <ArrowRight className="ml-1 h-4 w-4" />
+                </Link>
+              </Button>
+            </div>
+            <div className="mt-8 grid gap-4 xs:grid-cols-1 sm:grid-cols-2 lg:grid-cols-4">
+              {featured.map((ex) => (
+                <FeaturedMovementCard
+                  key={ex.id}
+                  id={ex.id}
+                  name={ex.name}
+                  primaryMuscle={ex.primaryMuscles[0] ?? null}
+                  equipment={ex.equipment}
+                  videoUrl={ex.videos[0].url}
+                />
+              ))}
+            </div>
+          </div>
+        </section>
+      ) : null}
+
       <section className="border-b">
         <div className="mx-auto max-w-6xl px-6 py-20">
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
@@ -113,7 +180,7 @@ export default function Home() {
                 <code className="rounded bg-muted px-1.5 py-0.5 font-mono text-xs">
                   exercise_id
                 </code>{" "}
-                is a string pointing at an exerciseapi.dev id — no local
+                is a string pointing at an exerciseapi.dev id &mdash; no local
                 exercise table required.
               </p>
             </div>

@@ -1,21 +1,22 @@
+"use client";
+
 import Link from "next/link";
-import { Plus } from "lucide-react";
-import { createClient } from "@/lib/supabase/server";
+import { useEffect, useState } from "react";
+import { Dumbbell, Plus, X } from "lucide-react";
+import { createClient } from "@/lib/supabase/client";
 import { Button } from "@/components/ui/button";
 import { StatusBadge } from "@/components/status-badge";
 import { SetupBanner } from "@/components/setup-banner";
+import { Skeleton } from "@/components/ui/skeleton";
+import { EmptyState } from "@/components/empty-state";
+import { getStore, type Workout } from "@/lib/workout-store";
+import { FirstVisitTutorial } from "@/components/first-visit-tutorial";
 
-interface WorkoutRow {
-  id: string;
-  name: string | null;
-  date: string;
-  status: string | null;
-  notes: string | null;
-  workout_exercises: { count: number }[];
-}
+const GUEST_BANNER_KEY = "wt_guest_banner_dismissed_v1";
+
+type WorkoutRow = Workout & { exercise_count: number };
 
 function formatDate(iso: string): string {
-  // Keep DB date (YYYY-MM-DD) stable across server/client render — format as UTC.
   const d = new Date(`${iso}T00:00:00Z`);
   return d.toLocaleDateString("en-US", {
     month: "short",
@@ -25,11 +26,80 @@ function formatDate(iso: string): string {
   });
 }
 
-export default async function WorkoutsPage() {
-  if (
-    !process.env.NEXT_PUBLIC_SUPABASE_URL ||
-    !process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
-  ) {
+export default function WorkoutsPage() {
+  const hasSupabaseEnv =
+    !!process.env.NEXT_PUBLIC_SUPABASE_URL &&
+    !!process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+
+  const [authLoaded, setAuthLoaded] = useState(!hasSupabaseEnv);
+  const [userId, setUserId] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [workouts, setWorkouts] = useState<WorkoutRow[]>([]);
+  const [error, setError] = useState<string | null>(null);
+  const [bannerDismissed, setBannerDismissed] = useState<boolean>(() => {
+    if (typeof window === "undefined") return true;
+    try {
+      return window.localStorage.getItem(GUEST_BANNER_KEY) === "true";
+    } catch {
+      return false;
+    }
+  });
+
+  // Resolve auth state on mount. Only runs when Supabase env is present;
+  // otherwise authLoaded is already true and userId stays null.
+  useEffect(() => {
+    if (!hasSupabaseEnv) return;
+    const client = createClient();
+    let cancelled = false;
+    client.auth
+      .getUser()
+      .then(({ data }) => {
+        if (cancelled) return;
+        setUserId(data.user?.id ?? null);
+        setAuthLoaded(true);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setAuthLoaded(true);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [hasSupabaseEnv]);
+
+  // Fetch workouts once auth is known.
+  useEffect(() => {
+    if (!authLoaded) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const store = await getStore(userId);
+        const rows = await store.listWorkouts();
+        if (cancelled) return;
+        setWorkouts(rows as WorkoutRow[]);
+        setError(null);
+      } catch (err) {
+        if (cancelled) return;
+        setError(err instanceof Error ? err.message : "Failed to load workouts");
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [authLoaded, userId]);
+
+  function dismissBanner() {
+    setBannerDismissed(true);
+    try {
+      window.localStorage.setItem(GUEST_BANNER_KEY, "true");
+    } catch {
+      // Non-fatal.
+    }
+  }
+
+  if (!hasSupabaseEnv) {
     return (
       <main className="mx-auto w-full max-w-5xl flex-1 px-6 py-12">
         <h1 className="text-3xl font-semibold tracking-tight">Workouts</h1>
@@ -44,43 +114,38 @@ export default async function WorkoutsPage() {
     );
   }
 
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-
-  if (!user) {
-    return (
-      <main className="mx-auto w-full max-w-3xl flex-1 px-6 py-24 text-center">
-        <h1 className="text-3xl font-semibold tracking-tight">Workouts</h1>
-        <p className="mt-3 text-muted-foreground">
-          Sign in to track workouts, log sets, and keep a history.
-        </p>
-        <div className="mt-8">
-          <Button asChild>
-            <Link href="/auth/signin">Sign in</Link>
-          </Button>
-        </div>
-      </main>
-    );
-  }
-
-  const { data: workouts, error } = await supabase
-    .from("workouts")
-    .select(
-      "id, name, date, status, notes, workout_exercises(count)"
-    )
-    .order("date", { ascending: false })
-    .order("created_at", { ascending: false });
+  const showGuestBanner = authLoaded && !userId && !bannerDismissed;
 
   return (
     <main className="mx-auto w-full max-w-5xl flex-1 px-6 py-12">
+      {authLoaded && !userId ? <FirstVisitTutorial /> : null}
+      {showGuestBanner ? (
+        <div className="mb-6 flex items-start justify-between gap-3 rounded-lg border bg-muted/30 px-4 py-3 text-sm text-muted-foreground">
+          <p>
+            Browsing as a guest. Your workouts live on this device.{" "}
+            <Link
+              href="/auth/signin"
+              className="font-medium text-foreground underline underline-offset-4 hover:text-foreground/80"
+            >
+              Sign up
+            </Link>{" "}
+            to save across devices.
+          </p>
+          <button
+            type="button"
+            onClick={dismissBanner}
+            aria-label="Dismiss"
+            className="rounded-md p-1 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+      ) : null}
+
       <div className="flex flex-wrap items-end justify-between gap-4">
         <div>
           <h1 className="text-3xl font-semibold tracking-tight">Workouts</h1>
-          <p className="mt-1 text-sm text-muted-foreground">
-            Your training log.
-          </p>
+          <p className="mt-1 text-sm text-muted-foreground">Your training log.</p>
         </div>
         <Button asChild>
           <Link href="/workouts/new">
@@ -90,52 +155,63 @@ export default async function WorkoutsPage() {
         </Button>
       </div>
 
-      {error ? (
+      {loading ? (
+        <ul className="mt-8 divide-y rounded-lg border bg-card">
+          {Array.from({ length: 4 }).map((_, i) => (
+            <li key={i} className="p-5">
+              <div className="flex items-center gap-3">
+                <Skeleton className="h-4 w-40" />
+                <Skeleton className="h-5 w-20 rounded-full" />
+              </div>
+              <Skeleton className="mt-2 h-3 w-52" />
+            </li>
+          ))}
+        </ul>
+      ) : error ? (
         <div className="mt-10 rounded-lg border border-destructive/30 bg-destructive/5 p-6 text-sm text-destructive">
-          {error.message}
+          {error}
         </div>
-      ) : !workouts || workouts.length === 0 ? (
-        <div className="mt-12 rounded-lg border border-dashed p-12 text-center">
-          <h2 className="font-medium">No workouts yet</h2>
-          <p className="mt-2 text-sm text-muted-foreground">
-            Build your first workout from the exercise catalog.
-          </p>
-          <Button asChild size="sm" className="mt-6">
-            <Link href="/workouts/new">Create your first</Link>
-          </Button>
-        </div>
+      ) : workouts.length === 0 ? (
+        <EmptyState
+          icon={Dumbbell}
+          title="No workouts yet"
+          description="Build your first workout from the exercise catalog."
+          className="mt-12"
+          secondary={
+            <Button asChild size="sm">
+              <Link href="/workouts/new">Create your first</Link>
+            </Button>
+          }
+        />
       ) : (
         <ul className="mt-8 divide-y rounded-lg border bg-card">
-          {(workouts as unknown as WorkoutRow[]).map((w) => {
-            const count = w.workout_exercises?.[0]?.count ?? 0;
-            return (
-              <li key={w.id}>
-                <Link
-                  href={`/workouts/${w.id}`}
-                  className="flex items-start justify-between gap-4 p-5 transition-colors hover:bg-accent/40"
-                >
-                  <div className="min-w-0">
-                    <div className="flex flex-wrap items-center gap-3">
-                      <span className="font-medium">
-                        {w.name || "Unnamed workout"}
-                      </span>
-                      <StatusBadge status={w.status} />
-                    </div>
-                    <div className="mt-1 text-sm text-muted-foreground">
-                      {formatDate(w.date)}
-                      <span className="mx-2">·</span>
-                      {count} exercise{count === 1 ? "" : "s"}
-                    </div>
-                    {w.notes ? (
-                      <p className="mt-2 line-clamp-1 text-sm text-muted-foreground">
-                        {w.notes}
-                      </p>
-                    ) : null}
+          {workouts.map((w) => (
+            <li key={w.id}>
+              <Link
+                href={`/workouts/${w.id}`}
+                className="flex items-start justify-between gap-4 p-5 transition-colors hover:bg-accent/40"
+              >
+                <div className="min-w-0">
+                  <div className="flex flex-wrap items-center gap-3">
+                    <span className="font-medium">
+                      {w.name || "Unnamed workout"}
+                    </span>
+                    <StatusBadge status={w.status} />
                   </div>
-                </Link>
-              </li>
-            );
-          })}
+                  <div className="mt-1 text-sm text-muted-foreground">
+                    {formatDate(w.date)}
+                    <span className="mx-2">·</span>
+                    {w.exercise_count} exercise{w.exercise_count === 1 ? "" : "s"}
+                  </div>
+                  {w.notes ? (
+                    <p className="mt-2 line-clamp-1 text-sm text-muted-foreground">
+                      {w.notes}
+                    </p>
+                  ) : null}
+                </div>
+              </Link>
+            </li>
+          ))}
         </ul>
       )}
     </main>
