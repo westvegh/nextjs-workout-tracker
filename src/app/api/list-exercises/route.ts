@@ -37,17 +37,30 @@ export async function GET(request: Request) {
     )
   );
   const search = searchParams.get("search") ?? undefined;
-  const muscle = searchParams.get("muscle") ?? undefined;
-  const equipment = searchParams.get("equipment") ?? undefined;
-  const category = searchParams.get("category") ?? undefined;
+  // Multi-select: client sends ?muscle=adductors&muscle=neck. getAll() handles it.
+  const muscles = searchParams.getAll("muscle").filter(Boolean);
+  const equipment = searchParams.getAll("equipment").filter(Boolean);
+  const categories = searchParams.getAll("category").filter(Boolean);
 
   try {
     // When any filter is active, use Fuse-backed catalog search (the upstream
     // API's search param is silently broken). Otherwise passthrough.
-    const needsLocal = !!(search || muscle || equipment || category || hasVideoFilter);
+    const needsLocal = !!(
+      search ||
+      muscles.length ||
+      equipment.length ||
+      categories.length ||
+      hasVideoFilter
+    );
     if (needsLocal) {
       const result = await searchAndPaginate(
-        { search, muscle, equipment, category, hasVideo: hasVideoFilter },
+        {
+          search,
+          muscles,
+          equipment,
+          categories,
+          hasVideo: hasVideoFilter,
+        },
         PAGE_SIZE,
         offset
       );

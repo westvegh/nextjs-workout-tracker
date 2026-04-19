@@ -56,15 +56,17 @@ export function ExerciseBrowser({
 
   // When filters change, push to URL and rely on the server component to
   // refetch + rehydrate initialExercises. The filters prop will come back in
-  // on the next render and we reset local pagination state.
+  // on the next render and we reset local pagination state. Multi-select chips
+  // are sent as repeated query params (?muscle=adductors&muscle=neck) so the
+  // server can OR within each filter category and AND across categories.
   const applyFilters = useCallback(
     (next: ExerciseFiltersValue) => {
       setFilters(next);
       const params = new URLSearchParams();
       if (next.search) params.set("search", next.search);
-      if (next.muscles.length) params.set("muscle", next.muscles[0]);
-      if (next.equipment.length) params.set("equipment", next.equipment[0]);
-      if (next.categories.length) params.set("category", next.categories[0]);
+      for (const m of next.muscles) params.append("muscle", m);
+      for (const e of next.equipment) params.append("equipment", e);
+      for (const c of next.categories) params.append("category", c);
       if (next.videos) params.set("videos", "1");
       if (next.favorites) params.set("favorites", "1");
       const qs = params.toString();
@@ -96,11 +98,9 @@ export function ExerciseBrowser({
       params.set("limit", String(pageFetchLimit));
       params.set("offset", String(offset));
       if (filters.search) params.set("search", filters.search);
-      if (filters.muscles.length) params.set("muscle", filters.muscles[0]);
-      if (filters.equipment.length)
-        params.set("equipment", filters.equipment[0]);
-      if (filters.categories.length)
-        params.set("category", filters.categories[0]);
+      for (const m of filters.muscles) params.append("muscle", m);
+      for (const e of filters.equipment) params.append("equipment", e);
+      for (const c of filters.categories) params.append("category", c);
       if (filters.videos) params.set("videos", "1");
       const resp = await fetch(`${fetchPath}?${params.toString()}`);
       if (!resp.ok) throw new Error(`load failed: ${resp.status}`);
@@ -139,32 +139,13 @@ export function ExerciseBrowser({
     }
   }, [sentinelIntersecting, loadMore]);
 
-  // Client-side post-filters: multi-chip within a category + favorites mode.
+  // Server now handles muscle/equipment/category multi-chip filtering with
+  // proper OR-within / AND-across semantics. Only favorites is still client-
+  // side because that state lives in localStorage.
   const visible = useMemo(() => {
-    let list = exercises;
-    // Multi-select: if more than one chip is selected in a category, retain
-    // only exercises that match any of them (honest filter across the page).
-    if (filters.muscles.length > 1) {
-      const set = new Set(filters.muscles.map((m) => m.toLowerCase()));
-      list = list.filter((ex) =>
-        ex.primaryMuscles.some((m) => set.has(m.toLowerCase()))
-      );
-    }
-    if (filters.equipment.length > 1) {
-      const set = new Set(filters.equipment.map((m) => m.toLowerCase()));
-      list = list.filter(
-        (ex) => ex.equipment && set.has(ex.equipment.toLowerCase())
-      );
-    }
-    if (filters.categories.length > 1) {
-      const set = new Set(filters.categories.map((m) => m.toLowerCase()));
-      list = list.filter((ex) => set.has(ex.category.toLowerCase()));
-    }
-    if (filters.favorites) {
-      list = list.filter((ex) => favorites.has(ex.id));
-    }
-    return list;
-  }, [exercises, favorites, filters.categories, filters.equipment, filters.favorites, filters.muscles]);
+    if (!filters.favorites) return exercises;
+    return exercises.filter((ex) => favorites.has(ex.id));
+  }, [exercises, favorites, filters.favorites]);
 
   // In favorites mode we need to fetch more pages until we have enough
   // matches or the catalog runs out. Kick that off reactively.

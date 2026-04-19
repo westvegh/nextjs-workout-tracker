@@ -17,9 +17,9 @@ const HAS_VIDEO_FETCH_LIMIT = 100;
 
 type SearchParams = Promise<{
   search?: string;
-  muscle?: string;
-  equipment?: string;
-  category?: string;
+  muscle?: string | string[];
+  equipment?: string | string[];
+  category?: string | string[];
   offset?: string;
   videos?: string;
   favorites?: string;
@@ -29,12 +29,20 @@ interface ExercisesPageProps {
   searchParams: SearchParams;
 }
 
+function toArray(v: string | string[] | undefined): string[] {
+  if (!v) return [];
+  return (Array.isArray(v) ? v : [v]).filter(Boolean);
+}
+
 export default async function ExercisesPage({
   searchParams,
 }: ExercisesPageProps) {
   const params = await searchParams;
   const hasVideoFilter = params.videos === "1";
   const favoritesFilter = params.favorites === "1";
+  const muscleParams = toArray(params.muscle);
+  const equipmentParams = toArray(params.equipment);
+  const categoryParams = toArray(params.category);
 
   if (!process.env.EXERCISEAPI_KEY) {
     return (
@@ -76,18 +84,18 @@ export default async function ExercisesPage({
     // search param is broken). No filters → direct API passthrough.
     const hasAnyFilter = !!(
       params.search ||
-      params.muscle ||
-      params.equipment ||
-      params.category ||
+      muscleParams.length ||
+      equipmentParams.length ||
+      categoryParams.length ||
       hasVideoFilter
     );
     const exercisesPromise = hasAnyFilter
       ? searchAndPaginate(
           {
             search: params.search,
-            muscle: params.muscle,
-            equipment: params.equipment,
-            category: params.category,
+            muscles: muscleParams,
+            equipment: equipmentParams,
+            categories: categoryParams,
             hasVideo: hasVideoFilter,
           },
           PAGE_SIZE,
@@ -136,9 +144,9 @@ export default async function ExercisesPage({
           initialTotal={total}
           initialFilters={{
             search: params.search ?? "",
-            muscles: params.muscle ? [params.muscle] : [],
-            equipment: params.equipment ? [params.equipment] : [],
-            categories: params.category ? [params.category] : [],
+            muscles: muscleParams,
+            equipment: equipmentParams,
+            categories: categoryParams,
             videos: hasVideoFilter,
             favorites: favoritesFilter,
           }}

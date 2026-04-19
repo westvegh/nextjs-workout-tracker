@@ -86,7 +86,7 @@ describe("searchAndPaginate — muscle filter", () => {
     });
 
     const { searchAndPaginate } = await import("./exercise-search");
-    const result = await searchAndPaginate({ muscle: "adductors" }, 50, 0);
+    const result = await searchAndPaginate({ muscles: ["adductors"] }, 50, 0);
 
     expect(result.total).toBe(2);
     expect(result.data.map((e) => e.id).sort()).toEqual(["1", "2"]);
@@ -103,7 +103,7 @@ describe("searchAndPaginate — muscle filter", () => {
     });
 
     const { searchAndPaginate } = await import("./exercise-search");
-    const result = await searchAndPaginate({ muscle: "adductors" }, 50, 0);
+    const result = await searchAndPaginate({ muscles: ["adductors"] }, 50, 0);
 
     expect(result.total).toBe(1);
     expect(result.data[0].id).toBe("2");
@@ -123,7 +123,7 @@ describe("searchAndPaginate — muscle filter", () => {
 
     const { searchAndPaginate } = await import("./exercise-search");
     // "tibialis" is not a displayGroup in the mocked data; substring hits.
-    const result = await searchAndPaginate({ muscle: "tibialis" }, 50, 0);
+    const result = await searchAndPaginate({ muscles: ["tibialis"] }, 50, 0);
 
     expect(result.total).toBe(1);
     expect(result.data[0].id).toBe("1");
@@ -142,7 +142,7 @@ describe("searchAndPaginate — muscle filter", () => {
 
     const { searchAndPaginate } = await import("./exercise-search");
     const result = await searchAndPaginate(
-      { muscle: "adductors", equipment: "barbell" },
+      { muscles: ["adductors"], equipment: ["barbell"] },
       50,
       0
     );
@@ -162,14 +162,59 @@ describe("searchAndPaginate — muscle filter", () => {
 
     const { searchAndPaginate } = await import("./exercise-search");
     const [lower, upper, mixed] = await Promise.all([
-      searchAndPaginate({ muscle: "adductors" }, 50, 0),
-      searchAndPaginate({ muscle: "ADDUCTORS" }, 50, 0),
-      searchAndPaginate({ muscle: "Adductors" }, 50, 0),
+      searchAndPaginate({ muscles: ["adductors"] }, 50, 0),
+      searchAndPaginate({ muscles: ["ADDUCTORS"] }, 50, 0),
+      searchAndPaginate({ muscles: ["Adductors"] }, 50, 0),
     ]);
 
     expect(lower.total).toBe(1);
     expect(upper.total).toBe(1);
     expect(mixed.total).toBe(1);
+  });
+
+  it("OR-within / AND-across: union of muscle groups intersected with equipment", async () => {
+    // 1: chest exercise, body only
+    // 2: chest exercise, barbell
+    // 3: back exercise, barbell
+    // 4: leg exercise, barbell (no chest, no back)
+    const catalog: ApiExercise[] = [
+      exercise({ id: "1", name: "Push-Up", primaryMuscles: ["pectoralis minor"], equipment: "body only" }),
+      exercise({ id: "2", name: "Bench Press", primaryMuscles: ["pectoralis major sternal head"], equipment: "barbell" }),
+      exercise({ id: "3", name: "Bent Over Row", primaryMuscles: ["latissimus dorsi"], equipment: "barbell" }),
+      exercise({ id: "4", name: "Squat", primaryMuscles: ["rectus femoris"], equipment: "barbell" }),
+    ];
+    mockFetch((url) => {
+      if (url.includes("/muscles")) return { body: { data: MUSCLE_GROUPS } };
+      return { body: { data: catalog, total: catalog.length, limit: 100, offset: 0 } };
+    });
+
+    const { searchAndPaginate } = await import("./exercise-search");
+
+    // chest OR back — should be 3 (push-up, bench, row)
+    const orMuscles = await searchAndPaginate(
+      { muscles: ["chest", "back"] },
+      50,
+      0
+    );
+    expect(orMuscles.total).toBe(3);
+    expect(orMuscles.data.map((e) => e.id).sort()).toEqual(["1", "2", "3"]);
+
+    // (chest OR back) AND barbell — should be 2 (bench, row)
+    const orMusclesAndBarbell = await searchAndPaginate(
+      { muscles: ["chest", "back"], equipment: ["barbell"] },
+      50,
+      0
+    );
+    expect(orMusclesAndBarbell.total).toBe(2);
+    expect(orMusclesAndBarbell.data.map((e) => e.id).sort()).toEqual(["2", "3"]);
+
+    // barbell OR body only (equipment OR-within) — should be 4 (all)
+    const orEquipment = await searchAndPaginate(
+      { equipment: ["barbell", "body only"] },
+      50,
+      0
+    );
+    expect(orEquipment.total).toBe(4);
   });
 
   it("does not double-fetch /muscles under concurrent first-call pressure", async () => {
@@ -183,9 +228,9 @@ describe("searchAndPaginate — muscle filter", () => {
 
     const { searchAndPaginate } = await import("./exercise-search");
     await Promise.all([
-      searchAndPaginate({ muscle: "adductors" }, 50, 0),
-      searchAndPaginate({ muscle: "chest" }, 50, 0),
-      searchAndPaginate({ muscle: "back" }, 50, 0),
+      searchAndPaginate({ muscles: ["adductors"] }, 50, 0),
+      searchAndPaginate({ muscles: ["chest"] }, 50, 0),
+      searchAndPaginate({ muscles: ["back"] }, 50, 0),
     ]);
 
     const musclesFetches = mock.mock.calls.filter((call) => {

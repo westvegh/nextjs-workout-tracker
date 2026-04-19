@@ -85,9 +85,12 @@ function getOrBuildIndex(catalog: ApiExercise[]): Fuse<ApiExercise> {
 
 export interface SearchFilters {
   search?: string;
-  muscle?: string;
-  equipment?: string;
-  category?: string;
+  // Multi-select: OR within each list, AND across lists.
+  // E.g., { muscles: ["adductors", "neck"], equipment: ["barbell"] } means
+  // "exercises hitting adductors OR neck, that ALSO use barbell".
+  muscles?: string[];
+  equipment?: string[];
+  categories?: string[];
   hasVideo?: boolean;
 }
 
@@ -96,41 +99,66 @@ export function applyStructuredFilters(
   filters: SearchFilters,
   muscleGroupMap: Record<string, string[]> | null
 ): ApiExercise[] {
+  // Pre-resolve the union of acceptable specific muscle names across all
+  // selected display groups. Empty array means "muscle filter inactive".
+  // Defensive fallback: if a selected group isn't in the map (unknown or
+  // legacy), include the lowercased group name itself for substring matching.
+  const muscleFilters = (filters.muscles ?? []).filter(Boolean);
+  const acceptableMuscles = new Set<string>();
+  const substringFallbacks: string[] = [];
+  for (const m of muscleFilters) {
+    const lower = m.toLowerCase();
+    const specificNames = muscleGroupMap?.[lower];
+    if (specificNames && specificNames.length > 0) {
+      for (const n of specificNames) acceptableMuscles.add(n);
+    } else {
+      substringFallbacks.push(lower);
+    }
+  }
+
+  const equipmentFilters = (filters.equipment ?? [])
+    .filter(Boolean)
+    .map((e) => e.toLowerCase());
+  const categoryFilters = (filters.categories ?? [])
+    .filter(Boolean)
+    .map((c) => c.toLowerCase());
+
   return items.filter((ex) => {
     if (filters.hasVideo && !(ex.videos && ex.videos.length > 0)) return false;
-    if (filters.muscle) {
-      const filterMuscle = filters.muscle.toLowerCase();
+
+    // Muscle: exercise matches if ANY of its primary or secondary muscles
+    // is in the union of acceptable specific names, OR matches any of the
+    // substring fallbacks (for unknown display groups).
+    if (muscleFilters.length > 0) {
       const exerciseMuscles = [
         ...(ex.primaryMuscles ?? []),
         ...(ex.secondaryMuscles ?? []),
       ].map((m) => m.toLowerCase());
+      const hitsResolved = exerciseMuscles.some((m) =>
+        acceptableMuscles.has(m)
+      );
+      const hitsFallback =
+        substringFallbacks.length > 0 &&
+        exerciseMuscles.some((m) =>
+          substringFallbacks.some((f) => m.includes(f))
+        );
+      if (!hitsResolved && !hitsFallback) return false;
+    }
 
-      // Prefer the resolved displayGroup → specific-names mapping. The /muscles
-      // endpoint returns groups like "adductors" with muscle names like
-      // "gracilis"; exercises only carry the specific names. Without the map we
-      // fall back to substring so an unknown group (missing from the API or
-      // passed by a legacy caller) doesn't silently drop every exercise.
-      const specificNames = muscleGroupMap?.[filterMuscle];
-      if (specificNames && specificNames.length > 0) {
-        if (!exerciseMuscles.some((m) => specificNames.includes(m))) {
-          return false;
-        }
-      } else if (!exerciseMuscles.some((m) => m.includes(filterMuscle))) {
-        return false;
-      }
+    // Equipment: exercise matches if its single equipment value is in the
+    // selected list. Each exercise has one equipment, but the user may
+    // accept several ("I have barbell or cable").
+    if (equipmentFilters.length > 0) {
+      const exEquipment = (ex.equipment ?? "").toLowerCase();
+      if (!equipmentFilters.includes(exEquipment)) return false;
     }
-    if (
-      filters.equipment &&
-      (ex.equipment ?? "").toLowerCase() !== filters.equipment.toLowerCase()
-    ) {
-      return false;
+
+    // Category: same shape as equipment.
+    if (categoryFilters.length > 0) {
+      const exCategory = (ex.category ?? "").toLowerCase();
+      if (!categoryFilters.includes(exCategory)) return false;
     }
-    if (
-      filters.category &&
-      (ex.category ?? "").toLowerCase() !== filters.category.toLowerCase()
-    ) {
-      return false;
-    }
+
     return true;
   });
 }
@@ -145,9 +173,10 @@ export async function searchAndPaginate(
   offset: number
 ): Promise<{ data: ApiExercise[]; total: number }> {
   // Resolve both caches up front so the filter itself stays sync and pure.
+  const needsMuscleMap = !!filters.muscles && filters.muscles.length > 0;
   const [catalog, muscleGroupMap] = await Promise.all([
     getCatalog(),
-    filters.muscle ? getMuscleGroups() : Promise.resolve(null),
+    needsMuscleMap ? getMuscleGroups() : Promise.resolve(null),
   ]);
 
   let base: ApiExercise[];
