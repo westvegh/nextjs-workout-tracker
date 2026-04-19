@@ -175,7 +175,8 @@ export class SupabaseStore implements WorkoutStore {
         Array.isArray(countRows) && countRows.length > 0
           ? Number(countRows[0]?.count ?? 0)
           : 0;
-      const { workout_exercises: _ignored, ...rest } = row;
+      const { workout_exercises, ...rest } = row;
+      void workout_exercises;
       return { ...(rest as Workout), exercise_count };
     });
   }
@@ -221,7 +222,8 @@ export class SupabaseStore implements WorkoutStore {
       return { ...rest, sets: exercise_sets ?? [] };
     });
 
-    const { workout_exercises: _ignored, ...base } = row;
+    const { workout_exercises, ...base } = row;
+    void workout_exercises;
     return { ...(base as Workout), exercises };
   }
 
