@@ -7,7 +7,12 @@ import { ArrowLeft, Check, Plus, Trash2 } from "lucide-react";
 import { Badge } from "@/components/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { finishWorkout, upsertSets, type SetInput } from "@/app/workouts/actions";
+import {
+  finishWorkout,
+  upsertSets,
+  type SetInput,
+} from "@/app/workouts/actions";
+import { getStore } from "@/lib/workout-store";
 
 interface SetState {
   id?: string;
@@ -48,6 +53,7 @@ interface WorkoutLoggerProps {
       }>;
     }>;
   };
+  isGuest?: boolean;
 }
 
 function toNumber(value: string): number | null {
@@ -61,7 +67,7 @@ function isValidUnit(value: string | null | undefined): value is "lbs" | "kg" {
   return value === "lbs" || value === "kg";
 }
 
-export function WorkoutLogger({ workout }: WorkoutLoggerProps) {
+export function WorkoutLogger({ workout, isGuest = false }: WorkoutLoggerProps) {
   const router = useRouter();
   const [exercises, setExercises] = useState<ExerciseState[]>(() =>
     workout.workout_exercises.map((ex) => ({
@@ -165,7 +171,12 @@ export function WorkoutLogger({ workout }: WorkoutLoggerProps) {
     setError(null);
     startTransition(async () => {
       try {
-        await upsertSets(workout.id, buildPayload());
+        if (isGuest) {
+          const store = await getStore(null);
+          await store.upsertSets(workout.id, buildPayload());
+        } else {
+          await upsertSets(workout.id, buildPayload());
+        }
         setSaved(true);
         router.refresh();
       } catch (err) {
@@ -178,8 +189,16 @@ export function WorkoutLogger({ workout }: WorkoutLoggerProps) {
     setError(null);
     startFinish(async () => {
       try {
-        await upsertSets(workout.id, buildPayload());
-        await finishWorkout(workout.id);
+        if (isGuest) {
+          const store = await getStore(null);
+          await store.upsertSets(workout.id, buildPayload());
+          await store.setWorkoutStatus(workout.id, "completed");
+          router.push(`/workouts/${workout.id}`);
+          router.refresh();
+        } else {
+          await upsertSets(workout.id, buildPayload());
+          await finishWorkout(workout.id);
+        }
       } catch (err) {
         // redirect() inside server action throws a special error — don't trap that as failure.
         if (err instanceof Error && err.message.toLowerCase().includes("next_redirect")) {

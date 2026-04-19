@@ -1,5 +1,3 @@
-import { redirect } from "next/navigation";
-import { createClient } from "@/lib/supabase/server";
 import { fetchExercise } from "@/lib/exercise-api/client";
 import { NewWorkoutBuilder } from "./new-workout-builder";
 import type { PickerResult } from "@/components/exercise-picker-dialog";
@@ -12,15 +10,6 @@ export default async function NewWorkoutPage({
   searchParams: SearchParams;
 }) {
   const params = await searchParams;
-
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-
-  if (!user) {
-    redirect("/auth/signin");
-  }
 
   let prefill: PickerResult | null = null;
   if (params.exerciseId && process.env.EXERCISEAPI_KEY) {

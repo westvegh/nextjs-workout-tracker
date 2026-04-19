@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useTransition } from "react";
+import { useRouter } from "next/navigation";
 import { Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -13,14 +14,31 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog";
 import { deleteWorkout } from "@/app/workouts/actions";
+import { getStore } from "@/lib/workout-store";
 
-export function DeleteWorkoutButton({ workoutId }: { workoutId: string }) {
+interface DeleteWorkoutButtonProps {
+  workoutId: string;
+  isGuest?: boolean;
+}
+
+export function DeleteWorkoutButton({
+  workoutId,
+  isGuest = false,
+}: DeleteWorkoutButtonProps) {
+  const router = useRouter();
   const [open, setOpen] = useState(false);
   const [pending, startTransition] = useTransition();
 
   function handleDelete() {
     startTransition(async () => {
-      await deleteWorkout(workoutId);
+      if (isGuest) {
+        const store = await getStore(null);
+        await store.deleteWorkout(workoutId);
+        router.push("/workouts");
+        router.refresh();
+      } else {
+        await deleteWorkout(workoutId);
+      }
     });
   }
 

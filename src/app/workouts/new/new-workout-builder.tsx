@@ -1,7 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useState, useTransition } from "react";
+import { useEffect, useState, useTransition } from "react";
 import { ArrowDown, ArrowUp, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -10,8 +10,10 @@ import {
   ExercisePickerDialog,
   type PickerResult,
 } from "@/components/exercise-picker-dialog";
-import { createWorkout, type PendingExercise } from "@/app/workouts/actions";
+import type { PendingExercise } from "@/app/workouts/actions";
 import { Badge } from "@/components/badge";
+import { createClient } from "@/lib/supabase/client";
+import { getStore } from "@/lib/workout-store";
 
 interface RowState extends PendingExercise {
   localId: string;
@@ -49,6 +51,26 @@ export function NewWorkoutBuilder({ prefill }: NewWorkoutBuilderProps) {
   );
   const [error, setError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
+  const [userId, setUserId] = useState<string | null>(null);
+
+  useEffect(() => {
+    const hasEnv =
+      !!process.env.NEXT_PUBLIC_SUPABASE_URL &&
+      !!process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+    if (!hasEnv) return;
+    let cancelled = false;
+    createClient()
+      .auth.getUser()
+      .then(({ data }) => {
+        if (!cancelled) setUserId(data.user?.id ?? null);
+      })
+      .catch(() => {
+        if (!cancelled) setUserId(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   function addExercise(picker: PickerResult) {
     setRows((prev) => [...prev, rowFromPicker(picker)]);
@@ -96,7 +118,8 @@ export function NewWorkoutBuilder({ prefill }: NewWorkoutBuilderProps) {
           equipment: row.equipment,
           default_sets: row.default_sets,
         }));
-        const id = await createWorkout({ name, date, exercises });
+        const store = await getStore(userId);
+        const { id } = await store.createWorkout({ name, date, exercises });
         router.push(`/workouts/${id}`);
         router.refresh();
       } catch (err) {
