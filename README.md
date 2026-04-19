@@ -2,7 +2,7 @@
 
 Ship a workout app in 30 minutes with [exerciseapi.dev](https://exerciseapi.dev).
 
-**Live demo:** [nextjs-workout-tracker-westvegh1-4170s-projects.vercel.app](https://nextjs-workout-tracker-westvegh1-4170s-projects.vercel.app)
+**Live demo:** [workouts.exerciseapi.dev](https://workouts.exerciseapi.dev)
 
 ![Landing page](./public/screenshots/landing.png)
 
