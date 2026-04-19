@@ -14,6 +14,7 @@ import { SessionHero } from "@/components/session-hero";
 import { SessionStickyBar } from "@/components/session-sticky-bar";
 import type { SetRowSetState } from "@/components/set-row";
 import { getExerciseHistory, type ExerciseHistory } from "@/lib/exercise-history";
+import { computeIsPR } from "@/lib/pr-detection";
 import { getStore } from "@/lib/workout-store";
 import {
   finishWorkout,
@@ -264,16 +265,19 @@ export function WorkoutLogger({
       if (autoReps.trim() === "") autoReps = String(history.last.reps);
     }
 
-    let wasPR = false;
-    if (willBeCompleted) {
-      const w = Number(autoWeight) || 0;
-      const r = Number(autoReps) || 0;
-      if (history?.pr) {
-        wasPR = w * r > history.pr.weight * history.pr.reps;
-      } else {
-        wasPR = w > 0 && r > 0;
-      }
-    }
+    // PR has to beat both the all-time history baseline AND any prior set
+    // already completed in this session — see computeIsPR for the full
+    // walk and the screenshot regression test.
+    const wasPR = willBeCompleted
+      ? computeIsPR({
+          exercises,
+          completingExerciseId: exerciseId,
+          completingSetIdx: setIdx,
+          newWeight: Number(autoWeight) || 0,
+          newReps: Number(autoReps) || 0,
+          historyPR: history?.pr ?? null,
+        })
+      : false;
 
     setExercises((prev) =>
       prev.map((exItem) => {
