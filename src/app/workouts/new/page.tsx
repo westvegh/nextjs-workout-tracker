@@ -1,8 +1,43 @@
-export default function NewWorkoutPage() {
-  return (
-    <main className="mx-auto max-w-3xl flex-1 px-6 py-12">
-      <h1 className="text-3xl font-semibold tracking-tight">New workout</h1>
-      <p className="mt-2 text-muted-foreground">TODO: workout builder.</p>
-    </main>
-  );
+import { redirect } from "next/navigation";
+import { createClient } from "@/lib/supabase/server";
+import { fetchExercise } from "@/lib/exercise-api/client";
+import { NewWorkoutBuilder } from "./new-workout-builder";
+import type { PickerResult } from "@/components/exercise-picker-dialog";
+
+type SearchParams = Promise<{ exerciseId?: string }>;
+
+export default async function NewWorkoutPage({
+  searchParams,
+}: {
+  searchParams: SearchParams;
+}) {
+  const params = await searchParams;
+
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  if (!user) {
+    redirect("/auth/signin");
+  }
+
+  let prefill: PickerResult | null = null;
+  if (params.exerciseId && process.env.EXERCISEAPI_KEY) {
+    try {
+      const ex = await fetchExercise(params.exerciseId);
+      if (ex) {
+        prefill = {
+          id: ex.id,
+          name: ex.name,
+          muscle: ex.primaryMuscles[0] ?? null,
+          equipment: ex.equipment,
+        };
+      }
+    } catch {
+      // Silently drop the prefill if the API call fails; user can still add manually.
+    }
+  }
+
+  return <NewWorkoutBuilder prefill={prefill} />;
 }
