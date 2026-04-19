@@ -57,7 +57,7 @@ export function ExerciseCard({ exercise, lastPerformed }: ExerciseCardProps) {
           </>
         ) : (
           <div className="flex h-full w-full items-center justify-center text-xs text-muted-foreground">
-            No video
+            Video coming soon
           </div>
         )}
         {hydrated ? (
