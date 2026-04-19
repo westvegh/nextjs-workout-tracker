@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { StatusBadge } from "@/components/status-badge";
 import { SetupBanner } from "@/components/setup-banner";
 import { getStore, type Workout } from "@/lib/workout-store";
+import { FirstVisitTutorial } from "@/components/first-visit-tutorial";
 
 const GUEST_BANNER_KEY = "wt_guest_banner_dismissed_v1";
 
@@ -115,6 +116,7 @@ export default function WorkoutsPage() {
 
   return (
     <main className="mx-auto w-full max-w-5xl flex-1 px-6 py-12">
+      {authLoaded && !userId ? <FirstVisitTutorial /> : null}
       {showGuestBanner ? (
         <div className="mb-6 flex items-start justify-between gap-3 rounded-lg border bg-muted/30 px-4 py-3 text-sm text-muted-foreground">
           <p>
