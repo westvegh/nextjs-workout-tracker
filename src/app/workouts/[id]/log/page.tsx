@@ -120,6 +120,7 @@ export default function WorkoutLogPage({ params }: { params: Params }) {
     status: workout.status,
     workout_exercises: workout.exercises.map((ex) => ({
       id: ex.id,
+      exercise_id: ex.exercise_id,
       exercise_name: ex.exercise_name,
       muscle: ex.muscle,
       equipment: ex.equipment,
@@ -135,5 +136,11 @@ export default function WorkoutLogPage({ params }: { params: Params }) {
     })),
   };
 
-  return <WorkoutLogger workout={workoutForLogger} isGuest={!userId} />;
+  return (
+    <WorkoutLogger
+      workout={workoutForLogger}
+      isGuest={!userId}
+      userId={userId}
+    />
+  );
 }

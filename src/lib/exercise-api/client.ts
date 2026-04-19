@@ -35,7 +35,14 @@ async function fetchWithTimeout(
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
   try {
-    return await fetch(url, { ...options, signal: controller.signal });
+    // cache: no-store — Next.js 15 caches fetch responses (including errors) by
+    // default during SSR. The exercise API is already cached at its edge; double
+    // caching causes stale 500s to stick around after transient API failures.
+    return await fetch(url, {
+      ...options,
+      cache: "no-store",
+      signal: controller.signal,
+    });
   } finally {
     clearTimeout(timeoutId);
   }
@@ -119,7 +126,7 @@ export async function fetchExercise(id: string): Promise<ApiExercise | null> {
   return body.data;
 }
 
-async function fetchSimpleList(path: string): Promise<string[]> {
+async function fetchList<T = unknown>(path: string): Promise<T[]> {
   const response = await fetchWithRetry(`${BASE_URL}/${path}`, {
     headers: headers(),
   });
@@ -127,19 +134,38 @@ async function fetchSimpleList(path: string): Promise<string[]> {
     throw new Error(`fetch ${path} failed: ${response.status}`);
   }
   const body = await response.json();
-  return body.data ?? body;
+  return (body.data ?? body) as T[];
 }
 
-export function fetchCategories(): Promise<string[]> {
-  return fetchSimpleList("categories");
+// API returns mixed shapes. Normalize to string[] for UI.
+// /equipment: string[] (flat)
+// /muscles: [{ displayGroup, muscles[] }] (extract displayGroup)
+// /categories: [{ category, count, description }] (extract category)
+function normalizeToStrings(raw: unknown[]): string[] {
+  return raw
+    .map((item) => {
+      if (typeof item === "string") return item;
+      if (item && typeof item === "object") {
+        const obj = item as Record<string, unknown>;
+        if (typeof obj.category === "string") return obj.category;
+        if (typeof obj.displayGroup === "string") return obj.displayGroup;
+        if (typeof obj.name === "string") return obj.name;
+      }
+      return null;
+    })
+    .filter((s): s is string => typeof s === "string" && s.length > 0);
 }
 
-export function fetchMuscles(): Promise<string[]> {
-  return fetchSimpleList("muscles");
+export async function fetchCategories(): Promise<string[]> {
+  return normalizeToStrings(await fetchList("categories"));
 }
 
-export function fetchEquipment(): Promise<string[]> {
-  return fetchSimpleList("equipment");
+export async function fetchMuscles(): Promise<string[]> {
+  return normalizeToStrings(await fetchList("muscles"));
+}
+
+export async function fetchEquipment(): Promise<string[]> {
+  return normalizeToStrings(await fetchList("equipment"));
 }
 
 export async function fetchStats(): Promise<ApiStatsResponse> {
