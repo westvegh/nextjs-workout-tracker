@@ -2,11 +2,13 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
-import { Plus, X } from "lucide-react";
+import { Dumbbell, Plus, X } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { Button } from "@/components/ui/button";
 import { StatusBadge } from "@/components/status-badge";
 import { SetupBanner } from "@/components/setup-banner";
+import { Skeleton } from "@/components/ui/skeleton";
+import { EmptyState } from "@/components/empty-state";
 import { getStore, type Workout } from "@/lib/workout-store";
 import { FirstVisitTutorial } from "@/components/first-visit-tutorial";
 
@@ -154,23 +156,33 @@ export default function WorkoutsPage() {
       </div>
 
       {loading ? (
-        <div className="mt-12 rounded-lg border border-dashed p-12 text-center text-sm text-muted-foreground">
-          Loading your workouts…
-        </div>
+        <ul className="mt-8 divide-y rounded-lg border bg-card">
+          {Array.from({ length: 4 }).map((_, i) => (
+            <li key={i} className="p-5">
+              <div className="flex items-center gap-3">
+                <Skeleton className="h-4 w-40" />
+                <Skeleton className="h-5 w-20 rounded-full" />
+              </div>
+              <Skeleton className="mt-2 h-3 w-52" />
+            </li>
+          ))}
+        </ul>
       ) : error ? (
         <div className="mt-10 rounded-lg border border-destructive/30 bg-destructive/5 p-6 text-sm text-destructive">
           {error}
         </div>
       ) : workouts.length === 0 ? (
-        <div className="mt-12 rounded-lg border border-dashed p-12 text-center">
-          <h2 className="font-medium">No workouts yet</h2>
-          <p className="mt-2 text-sm text-muted-foreground">
-            Build your first workout from the exercise catalog.
-          </p>
-          <Button asChild size="sm" className="mt-6">
-            <Link href="/workouts/new">Create your first</Link>
-          </Button>
-        </div>
+        <EmptyState
+          icon={Dumbbell}
+          title="No workouts yet"
+          description="Build your first workout from the exercise catalog."
+          className="mt-12"
+          secondary={
+            <Button asChild size="sm">
+              <Link href="/workouts/new">Create your first</Link>
+            </Button>
+          }
+        />
       ) : (
         <ul className="mt-8 divide-y rounded-lg border bg-card">
           {workouts.map((w) => (

@@ -3,6 +3,7 @@
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Trash2 } from "lucide-react";
+import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -31,13 +32,20 @@ export function DeleteWorkoutButton({
 
   function handleDelete() {
     startTransition(async () => {
-      if (isGuest) {
-        const store = await getStore(null);
-        await store.deleteWorkout(workoutId);
-        router.push("/workouts");
-        router.refresh();
-      } else {
-        await deleteWorkout(workoutId);
+      try {
+        if (isGuest) {
+          const store = await getStore(null);
+          await store.deleteWorkout(workoutId);
+          router.push("/workouts");
+          router.refresh();
+        } else {
+          await deleteWorkout(workoutId);
+        }
+        toast.success("Workout deleted.");
+      } catch (err) {
+        toast.error(
+          err instanceof Error ? err.message : "Delete failed."
+        );
       }
     });
   }
