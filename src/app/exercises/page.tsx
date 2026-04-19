@@ -8,9 +8,11 @@ import {
 import { ExerciseCard } from "@/components/exercise-card";
 import { ExerciseFilters } from "@/components/exercise-filters";
 import { SetupBanner } from "@/components/setup-banner";
+import { DemoFooterCta } from "@/components/demo-footer-cta";
 import { Button } from "@/components/ui/button";
 
 const PAGE_SIZE = 24;
+const HAS_VIDEO_FETCH_LIMIT = 100;
 
 type SearchParams = Promise<{
   search?: string;
@@ -18,6 +20,7 @@ type SearchParams = Promise<{
   equipment?: string;
   category?: string;
   offset?: string;
+  videos?: string;
 }>;
 
 interface ExercisesPageProps {
@@ -29,6 +32,7 @@ export default async function ExercisesPage({
 }: ExercisesPageProps) {
   const params = await searchParams;
   const offset = Math.max(0, Number(params.offset ?? 0) || 0);
+  const hasVideoFilter = params.videos === "1";
 
   if (!process.env.EXERCISEAPI_KEY) {
     return (
@@ -68,7 +72,9 @@ export default async function ExercisesPage({
     const [exercisesResp, musclesResp, equipmentResp, categoriesResp] =
       await Promise.all([
         fetchExercises({
-          limit: PAGE_SIZE,
+          // When filtering to has-video we over-fetch and filter client-side
+          // because the API doesn't support a has_video query param.
+          limit: hasVideoFilter ? HAS_VIDEO_FETCH_LIMIT : PAGE_SIZE,
           offset,
           search: params.search,
           muscle: params.muscle,
@@ -88,13 +94,33 @@ export default async function ExercisesPage({
       error instanceof Error ? error.message : "Failed to load exercises.";
   }
 
+  // If the has-video filter is on, filter in memory and trim to a single page.
+  const visibleExercises = data
+    ? hasVideoFilter
+      ? data.data
+          .filter((ex) => Array.isArray(ex.videos) && ex.videos.length > 0)
+          .slice(0, PAGE_SIZE)
+      : data.data
+    : [];
+
   const hasFilters = Boolean(
-    params.search || params.muscle || params.equipment || params.category
+    params.search ||
+      params.muscle ||
+      params.equipment ||
+      params.category ||
+      hasVideoFilter
   );
 
   const prevOffset = Math.max(0, offset - PAGE_SIZE);
   const nextOffset = offset + PAGE_SIZE;
-  const hasNext = data ? data.data.length === PAGE_SIZE : false;
+  // When the has-video filter is on, pagination is best-effort — we over-fetch
+  // a single page and don't know how many video-backed exercises exist beyond
+  // it. Disable Next to avoid misleading the visitor.
+  const hasNext = data
+    ? hasVideoFilter
+      ? false
+      : data.data.length === PAGE_SIZE
+    : false;
 
   function buildPageLink(targetOffset: number): string {
     const qs = new URLSearchParams();
@@ -102,6 +128,7 @@ export default async function ExercisesPage({
     if (params.muscle) qs.set("muscle", params.muscle);
     if (params.equipment) qs.set("equipment", params.equipment);
     if (params.category) qs.set("category", params.category);
+    if (hasVideoFilter) qs.set("videos", "1");
     if (targetOffset > 0) qs.set("offset", String(targetOffset));
     const qsString = qs.toString();
     return qsString ? `/exercises?${qsString}` : "/exercises";
@@ -133,6 +160,7 @@ export default async function ExercisesPage({
             muscle: params.muscle,
             equipment: params.equipment,
             category: params.category,
+            videos: hasVideoFilter,
           }}
         />
       </div>
@@ -141,12 +169,12 @@ export default async function ExercisesPage({
         <div className="mt-10 rounded-lg border border-destructive/30 bg-destructive/5 p-6 text-sm text-destructive">
           {loadError}
         </div>
-      ) : data && data.data.length === 0 ? (
+      ) : data && visibleExercises.length === 0 ? (
         <EmptyState hasFilters={hasFilters} />
       ) : data ? (
         <>
           <div className="mt-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-            {data.data.map((exercise) => (
+            {visibleExercises.map((exercise) => (
               <ExerciseCard key={exercise.id} exercise={exercise} />
             ))}
           </div>
@@ -166,7 +194,7 @@ export default async function ExercisesPage({
               )}
             </Button>
             <span className="text-xs text-muted-foreground">
-              Showing {offset + 1}–{offset + data.data.length}
+              Showing {offset + 1}&ndash;{offset + visibleExercises.length}
             </span>
             <Button
               asChild
@@ -184,6 +212,8 @@ export default async function ExercisesPage({
           </div>
         </>
       ) : null}
+
+      <DemoFooterCta />
     </main>
   );
 }
