@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { cookies } from "next/headers";
 import { UserMenu } from "@/components/user-menu";
 import { NavCta } from "@/components/nav-cta";
 import { ThemeToggle } from "@/components/theme-toggle";
@@ -7,13 +8,24 @@ import { createClient } from "@/lib/supabase/server";
 export async function Nav() {
   let email: string | null = null;
 
-  // Supabase client throws when env vars are missing — degrade gracefully.
-  try {
-    const supabase = await createClient();
-    const { data } = await supabase.auth.getUser();
-    email = data.user?.email ?? null;
-  } catch {
-    email = null;
+  // Fast path for anon visitors: if no Supabase auth cookie is present, skip
+  // the supabase.auth.getUser() network call entirely. Signed-in users still
+  // verify the session, which is a single network round-trip per page render.
+  const cookieStore = await cookies();
+  const hasAuthCookie = cookieStore
+    .getAll()
+    .some(
+      (c) => c.name.startsWith("sb-") && c.name.endsWith("-auth-token")
+    );
+
+  if (hasAuthCookie) {
+    try {
+      const supabase = await createClient();
+      const { data } = await supabase.auth.getUser();
+      email = data.user?.email ?? null;
+    } catch {
+      email = null;
+    }
   }
 
   const isSignedIn = !!email;

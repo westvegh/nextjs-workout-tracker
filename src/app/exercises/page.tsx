@@ -12,6 +12,11 @@ import { ExerciseBrowser } from "@/components/exercise-browser";
 import { SetupBanner } from "@/components/setup-banner";
 import { DemoFooterCta } from "@/components/demo-footer-cta";
 
+// searchParams forces dynamic rendering; this still helps the unfiltered
+// first-load path and documents cache intent. The underlying fetch layer
+// (lib/exercise-api/client.ts) is what actually moves the needle.
+export const revalidate = 60;
+
 const PAGE_SIZE = 24;
 const HAS_VIDEO_FETCH_LIMIT = 100;
 

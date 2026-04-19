@@ -35,12 +35,14 @@ async function fetchWithTimeout(
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
   try {
-    // cache: no-store — Next.js 15 caches fetch responses (including errors) by
-    // default during SSR. The exercise API is already cached at its edge; double
-    // caching causes stale 500s to stick around after transient API failures.
+    // Cache policy: Next.js caches successful fetches per the `next.revalidate`
+    // window. Non-2xx responses are thrown below before anything downstream
+    // caches them. Previous `cache: "no-store"` made every server render re-hit
+    // the upstream API; with revalidation, repeat visits serve from cache and
+    // only cold instances pay the round-trip. Cache is manually invalidated
+    // via `revalidateTag(...)` if the catalog changes.
     return await fetch(url, {
       ...options,
-      cache: "no-store",
       signal: controller.signal,
     });
   } finally {
@@ -103,6 +105,7 @@ export async function fetchExercises(
   });
   const response = await fetchWithRetry(`${BASE_URL}/exercises${query}`, {
     headers: headers(),
+    next: { revalidate: 3600, tags: ["exerciseapi-exercises"] },
   });
   if (!response.ok) {
     throw new Error(`fetchExercises failed: ${response.status}`);
@@ -113,7 +116,13 @@ export async function fetchExercises(
 export async function fetchExercise(id: string): Promise<ApiExercise | null> {
   const response = await fetchWithRetry(
     `${BASE_URL}/exercises/${encodeURIComponent(id)}`,
-    { headers: headers() }
+    {
+      headers: headers(),
+      next: {
+        revalidate: 3600,
+        tags: ["exerciseapi-exercises", `exerciseapi-exercise-${id}`],
+      },
+    }
   );
   if (response.status === 404) return null;
   if (!response.ok) {
@@ -124,8 +133,11 @@ export async function fetchExercise(id: string): Promise<ApiExercise | null> {
 }
 
 async function fetchList<T = unknown>(path: string): Promise<T[]> {
+  // Taxonomy endpoints (categories, muscles, equipment) almost never change —
+  // 1-day cache is plenty, manually invalidate via `revalidateTag` if needed.
   const response = await fetchWithRetry(`${BASE_URL}/${path}`, {
     headers: headers(),
+    next: { revalidate: 86400, tags: ["exerciseapi-taxonomy"] },
   });
   if (!response.ok) {
     throw new Error(`fetch ${path} failed: ${response.status}`);
@@ -168,6 +180,7 @@ export async function fetchEquipment(): Promise<string[]> {
 export async function fetchStats(): Promise<ApiStatsResponse> {
   const response = await fetchWithRetry(`${BASE_URL}/stats`, {
     headers: headers(),
+    next: { revalidate: 300, tags: ["exerciseapi-stats"] },
   });
   if (!response.ok) {
     throw new Error(`fetchStats failed: ${response.status}`);

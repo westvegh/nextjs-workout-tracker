@@ -1,9 +1,14 @@
 import Link from "next/link";
+import { unstable_cache } from "next/cache";
 import { ArrowRight, Database, Lock, PlayCircle, Sparkles } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { FeaturedMovementCard } from "@/components/featured-movement-card";
 import { fetchExercises } from "@/lib/exercise-api/client";
 import type { ApiExercise } from "@/lib/exercise-api/types";
+
+// ISR — let Next.js serve cached HTML between revalidations so most visitors
+// don't re-run the server component at all.
+export const revalidate = 60;
 
 const GITHUB_URL = "https://github.com/westvegh/nextjs-workout-tracker";
 const API_URL = "https://exerciseapi.dev";
@@ -44,28 +49,41 @@ const SCHEMA_TREE = `auth.users (Supabase)
                   |
                   +-- exercise_sets (set_number, weight, weight_unit, reps, is_completed)`;
 
-async function loadFeaturedMovements(): Promise<ApiExercise[]> {
-  if (!process.env.EXERCISEAPI_KEY) return [];
-  const found: ApiExercise[] = [];
-  try {
-    for (let page = 0; page < FEATURED_MAX_PAGES; page++) {
-      const resp = await fetchExercises({
-        limit: FEATURED_PAGE_SIZE,
-        offset: page * FEATURED_PAGE_SIZE,
-      });
-      for (const ex of resp.data) {
-        if (Array.isArray(ex.videos) && ex.videos.length > 0) {
-          found.push(ex);
-          if (found.length >= FEATURED_CARDS) return found;
+// Only ~8 of 2,198 exercises carry videos today, and they're scattered
+// alphabetically. The loop walks up to 25 pages of 100 to collect them, which
+// is expensive enough (2-3s cold) that we must not repeat it per request.
+// unstable_cache caches the result across all home renders on this Vercel
+// instance. The inner fetchExercises calls are individually cached too (see
+// lib/exercise-api/client.ts), so even a cold walk after cache eviction is
+// quick on the second visit. Invalidate via `revalidateTag("exerciseapi-exercises")`
+// when new videos land.
+// TODO: when upstream adds ?has_video=1, replace this walk with a single call.
+const loadFeaturedMovements = unstable_cache(
+  async (): Promise<ApiExercise[]> => {
+    if (!process.env.EXERCISEAPI_KEY) return [];
+    const found: ApiExercise[] = [];
+    try {
+      for (let page = 0; page < FEATURED_MAX_PAGES; page++) {
+        const resp = await fetchExercises({
+          limit: FEATURED_PAGE_SIZE,
+          offset: page * FEATURED_PAGE_SIZE,
+        });
+        for (const ex of resp.data) {
+          if (Array.isArray(ex.videos) && ex.videos.length > 0) {
+            found.push(ex);
+            if (found.length >= FEATURED_CARDS) return found;
+          }
         }
+        if (resp.data.length < FEATURED_PAGE_SIZE) break;
       }
-      if (resp.data.length < FEATURED_PAGE_SIZE) break;
+    } catch {
+      return found;
     }
-  } catch {
     return found;
-  }
-  return found;
-}
+  },
+  ["featured-movements-v1"],
+  { revalidate: 3600, tags: ["exerciseapi-exercises"] }
+);
 
 export default async function Home() {
   const featured = await loadFeaturedMovements();
