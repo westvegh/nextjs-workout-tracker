@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Loader2, Search, Star } from "lucide-react";
+import { Search, Star } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -12,9 +12,27 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import { Skeleton } from "@/components/ui/skeleton";
 import type { ApiExercise } from "@/lib/exercise-api/types";
 import { useExerciseFavorites } from "@/lib/exercise-favorites";
 import { useRecentExercises, pushRecent } from "@/lib/recent-exercises";
+
+const SKELETON_ROW_COUNT = 5;
+
+function PickerRowSkeleton() {
+  return (
+    <li>
+      <div className="flex items-center gap-3 p-3">
+        <Skeleton className="h-10 w-14 shrink-0" />
+        <div className="min-w-0 flex-1 space-y-2">
+          <Skeleton className="h-4 w-2/3" />
+          <Skeleton className="h-3 w-1/3" />
+        </div>
+        <Skeleton className="h-9 w-9 shrink-0" />
+      </div>
+    </li>
+  );
+}
 
 export interface PickerResult {
   id: string;
@@ -102,12 +120,26 @@ export function ExercisePickerDialog({
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<ApiExercise[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  // Tracks which (trimmed) query `results` corresponds to. Loading and
+  // empty-state are derived from this + `query` — no synchronous setState
+  // in the effect body, which the React 19 lint rule forbids.
+  const [resultsForQuery, setResultsForQuery] = useState<string>("");
+  const [error, setError] = useState<{ forQuery: string; message: string } | null>(
+    null
+  );
   // Cache of exercises we have already seen so recents/favorites have a
   // renderable record without firing individual /exercises/:id requests.
   const [cache, setCache] = useState<Map<string, ApiExercise>>(new Map());
   const abortRef = useRef<AbortController | null>(null);
+
+  const trimmedQuery = query.trim();
+  // Show skeleton whenever the typed query doesn't yet match the query the
+  // current results were fetched for, unless that query already errored.
+  const loading =
+    trimmedQuery !== "" &&
+    resultsForQuery !== trimmedQuery &&
+    error?.forQuery !== trimmedQuery;
+  const activeError = error?.forQuery === trimmedQuery ? error.message : null;
 
   const { favorites, toggle: toggleFavorite } = useExerciseFavorites();
   const { recents } = useRecentExercises();
@@ -121,17 +153,22 @@ export function ExercisePickerDialog({
   }, []);
 
   useEffect(() => {
-    if (!open) return;
+    // No dialog open, or empty query: nothing to fetch. Recents/favorites
+    // already render from cache.
+    if (!open || trimmedQuery === "") return;
+    // Already have results (or an error) for this exact query: no refetch.
+    if (resultsForQuery === trimmedQuery || error?.forQuery === trimmedQuery)
+      return;
+
     const controller = new AbortController();
     abortRef.current?.abort();
     abortRef.current = controller;
+    const fetchedQuery = trimmedQuery;
 
     const handle = setTimeout(async () => {
-      setLoading(true);
-      setError(null);
       try {
         const response = await fetch(
-          `/api/search-exercises?q=${encodeURIComponent(query)}`,
+          `/api/search-exercises?q=${encodeURIComponent(fetchedQuery)}`,
           { signal: controller.signal }
         );
         if (!response.ok) {
@@ -141,12 +178,14 @@ export function ExercisePickerDialog({
         const body = await response.json();
         const data: ApiExercise[] = body.data ?? [];
         setResults(data);
+        setResultsForQuery(fetchedQuery);
         cacheExercises(data);
       } catch (err) {
         if ((err as { name?: string }).name === "AbortError") return;
-        setError(err instanceof Error ? err.message : "Search failed");
-      } finally {
-        setLoading(false);
+        setError({
+          forQuery: fetchedQuery,
+          message: err instanceof Error ? err.message : "Search failed",
+        });
       }
     }, 200);
 
@@ -154,7 +193,7 @@ export function ExercisePickerDialog({
       clearTimeout(handle);
       controller.abort();
     };
-  }, [open, query, cacheExercises]);
+  }, [open, trimmedQuery, resultsForQuery, error, cacheExercises]);
 
   function handleAdd(ex: ApiExercise) {
     // Cache the clicked exercise and bump it to the front of recents so the
@@ -252,13 +291,17 @@ export function ExercisePickerDialog({
 
           <div className="rounded-md border">
             {loading ? (
-              <div className="flex items-center justify-center gap-2 p-6 text-sm text-muted-foreground">
-                <Loader2 className="h-4 w-4 animate-spin" />
-                Searching
+              <div aria-busy="true" aria-live="polite" data-testid="picker-loading">
+                <span className="sr-only">Searching</span>
+                <ul className="divide-y">
+                  {Array.from({ length: SKELETON_ROW_COUNT }).map((_, i) => (
+                    <PickerRowSkeleton key={i} />
+                  ))}
+                </ul>
               </div>
-            ) : error ? (
-              <div className="p-6 text-sm text-destructive">{error}</div>
-            ) : results.length === 0 ? (
+            ) : activeError ? (
+              <div className="p-6 text-sm text-destructive">{activeError}</div>
+            ) : showDefaultSections || results.length === 0 ? (
               <div className="p-6 text-center text-sm text-muted-foreground">
                 {query ? (
                   <>
