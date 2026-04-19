@@ -59,13 +59,20 @@ async function fetchWithRetry(
   }
 }
 
-function buildQuery(
-  params: Record<string, string | number | undefined>
-): string {
+type QueryValue = string | number | string[] | undefined;
+
+function buildQuery(params: Record<string, QueryValue>): string {
   const parts: string[] = [];
   for (const [k, v] of Object.entries(params)) {
-    if (v === undefined || v === null || v === "") continue;
-    parts.push(`${encodeURIComponent(k)}=${encodeURIComponent(String(v))}`);
+    if (v === undefined || v === null) continue;
+    if (Array.isArray(v)) {
+      for (const item of v) {
+        if (item === undefined || item === null || item === "") continue;
+        parts.push(`${encodeURIComponent(k)}=${encodeURIComponent(String(item))}`);
+      }
+    } else if (v !== "") {
+      parts.push(`${encodeURIComponent(k)}=${encodeURIComponent(String(v))}`);
+    }
   }
   return parts.length ? `?${parts.join("&")}` : "";
 }
@@ -73,17 +80,19 @@ function buildQuery(
 export interface FetchExercisesParams {
   limit?: number;
   offset?: number;
-  muscle?: string;
-  equipment?: string;
-  category?: string;
+  muscle?: string | string[];
+  equipment?: string | string[];
+  category?: string | string[];
   search?: string;
 }
 
 export async function fetchExercises(
   params: FetchExercisesParams = {}
 ): Promise<ApiListResponse<ApiExercise>> {
-  // The exerciseapi.dev /exercises endpoint uses `search=` for full-text
-  // query. `q=` is rejected with 500 INTERNAL_ERROR. Verified 2026-04-19.
+  // Upstream /v1/exercises accepts ?search= (fuzzy full-text) and supports
+  // multi-value filters for muscle/equipment/category via repeated params
+  // (?muscle=a&muscle=b) — OR within each axis, AND across axes. Fixed
+  // 2026-04-19 in the exercise-api repo.
   const query = buildQuery({
     limit: params.limit ?? PAGE_SIZE,
     offset: params.offset ?? 0,
@@ -99,18 +108,6 @@ export async function fetchExercises(
     throw new Error(`fetchExercises failed: ${response.status}`);
   }
   return response.json();
-}
-
-export async function fetchAllExercises(): Promise<ApiExercise[]> {
-  const all: ApiExercise[] = [];
-  let offset = 0;
-  while (true) {
-    const page = await fetchExercises({ limit: PAGE_SIZE, offset });
-    all.push(...page.data);
-    if (page.data.length < PAGE_SIZE) break;
-    offset += PAGE_SIZE;
-  }
-  return all;
 }
 
 export async function fetchExercise(id: string): Promise<ApiExercise | null> {
@@ -162,36 +159,6 @@ export async function fetchCategories(): Promise<string[]> {
 
 export async function fetchMuscles(): Promise<string[]> {
   return normalizeToStrings(await fetchList("muscles"));
-}
-
-export interface MuscleGroup {
-  displayGroup: string;
-  muscles: string[];
-}
-
-/**
- * Returns the raw /muscles payload with display groups AND their specific
- * muscle names (e.g., "adductors" → ["gracilis", "adductor longus", ...]).
- * The chip UI uses fetchMuscles() for display; filtering logic needs the
- * full mapping to translate a chip value into the list of muscles that
- * actually appear on exercises.
- */
-export async function fetchMuscleGroups(): Promise<MuscleGroup[]> {
-  const raw = await fetchList<unknown>("muscles");
-  const out: MuscleGroup[] = [];
-  for (const item of raw) {
-    if (!item || typeof item !== "object") continue;
-    const obj = item as Record<string, unknown>;
-    if (typeof obj.displayGroup !== "string") continue;
-    if (!Array.isArray(obj.muscles)) continue;
-    out.push({
-      displayGroup: obj.displayGroup,
-      muscles: obj.muscles.filter(
-        (m): m is string => typeof m === "string"
-      ),
-    });
-  }
-  return out;
 }
 
 export async function fetchEquipment(): Promise<string[]> {

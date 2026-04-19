@@ -43,16 +43,17 @@ export async function GET(request: Request) {
   const categories = searchParams.getAll("category").filter(Boolean);
 
   try {
-    // When any filter is active, use Fuse-backed catalog search (the upstream
-    // API's search param is silently broken). Otherwise passthrough.
-    const needsLocal = !!(
+    // Any active filter goes through searchAndPaginate (upstream handles
+    // search + multi-value muscle/equipment/category). Unfiltered reads use
+    // the passthrough for parity with the page's initial load.
+    const needsFilter = !!(
       search ||
       muscles.length ||
       equipment.length ||
       categories.length ||
       hasVideoFilter
     );
-    if (needsLocal) {
+    if (needsFilter) {
       const result = await searchAndPaginate(
         {
           search,

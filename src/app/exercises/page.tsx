@@ -80,8 +80,8 @@ export default async function ExercisesPage({
   let loadError: string | null = null;
 
   try {
-    // Any active filter goes through the local Fuse-backed search (upstream
-    // search param is broken). No filters → direct API passthrough.
+    // Any active filter goes through searchAndPaginate (upstream handles the
+    // search + multi-value filters). No filters → direct API passthrough.
     const hasAnyFilter = !!(
       params.search ||
       muscleParams.length ||

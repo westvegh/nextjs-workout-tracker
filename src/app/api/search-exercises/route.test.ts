@@ -4,9 +4,10 @@ import type { ApiExercise } from "@/lib/exercise-api/types";
 const ORIGINAL_ENV = { ...process.env };
 const ORIGINAL_FETCH = globalThis.fetch;
 
-type FetchHandler = (url: string) => { body: unknown; status?: number };
+type FetchCall = { url: string };
 
-function mockFetch(handler: FetchHandler) {
+function mockFetch(responder: (call: FetchCall) => { body: unknown; status?: number }) {
+  const calls: FetchCall[] = [];
   const mock = vi.fn(async (input: RequestInfo | URL) => {
     const url =
       typeof input === "string"
@@ -14,14 +15,15 @@ function mockFetch(handler: FetchHandler) {
         : input instanceof URL
           ? input.toString()
           : (input as Request).url;
-    const { body, status = 200 } = handler(url);
+    calls.push({ url });
+    const { body, status = 200 } = responder({ url });
     return new Response(JSON.stringify(body), {
       status,
       headers: { "Content-Type": "application/json" },
     });
   });
   globalThis.fetch = mock as unknown as typeof fetch;
-  return mock;
+  return { mock, calls };
 }
 
 function exercise(overrides: Partial<ApiExercise> = {}): ApiExercise {
@@ -48,12 +50,9 @@ function exercise(overrides: Partial<ApiExercise> = {}): ApiExercise {
   };
 }
 
-beforeEach(async () => {
+beforeEach(() => {
   process.env.EXERCISEAPI_KEY = "test-key";
   process.env.NEXT_PUBLIC_EXERCISEAPI_URL = "https://api.example/v1";
-  const mod = await import("@/lib/exercise-search");
-  mod.invalidateCatalog();
-  mod.invalidateMuscleGroups();
 });
 
 afterEach(() => {
@@ -63,34 +62,17 @@ afterEach(() => {
 });
 
 describe("GET /api/search-exercises", () => {
-  it("filters by query locally because upstream ?search= is silently broken", async () => {
-    // Upstream returns unfiltered alphabetical head regardless of ?search=.
-    // Simulate that: the handler ignores the query string entirely and
-    // always returns the full catalog. If the route calls the upstream with
-    // ?search=..., the mock returns everything, and Bench Press would NOT
-    // be the first result without Fuse-backed local filtering.
-    const catalog: ApiExercise[] = [
-      exercise({
-        id: "1",
-        name: "1.5 Rep Squat",
-        primaryMuscles: ["rectus femoris"],
-        equipment: "barbell",
-      }),
-      exercise({
-        id: "2",
-        name: "18 Inch Deadlift",
-        primaryMuscles: ["erector spinae"],
-        equipment: "barbell",
-      }),
-      exercise({
-        id: "3",
-        name: "Barbell Bench Press",
-        primaryMuscles: ["pectoralis major sternal head"],
-        equipment: "barbell",
-      }),
-    ];
-    mockFetch(() => ({
-      body: { data: catalog, total: catalog.length, limit: 100, offset: 0 },
+  it("forwards ?q=<term> to upstream as ?search=<term> and returns its data", async () => {
+    const { calls } = mockFetch(() => ({
+      body: {
+        data: [
+          exercise({ id: "1", name: "Barbell Bench Press" }),
+          exercise({ id: "2", name: "Dumbbell Bench Press" }),
+        ],
+        total: null,
+        limit: 20,
+        offset: 0,
+      },
     }));
 
     const { GET } = await import("./route");
@@ -100,16 +82,11 @@ describe("GET /api/search-exercises", () => {
     const res = await GET(req);
     expect(res.status).toBe(200);
     const body = (await res.json()) as { data: ApiExercise[] };
-
-    // The regression this guards: before the fix, the route returned the
-    // alphabetical head (["1.5 Rep Squat", "18 Inch Deadlift", ...]) because
-    // it trusted the broken upstream ?search= param.
-    expect(body.data.length).toBeGreaterThan(0);
-    expect(body.data[0].name).toBe("Barbell Bench Press");
-    // And must NOT contain the unrelated alphabetical head.
-    const names = body.data.map((e) => e.name);
-    expect(names).not.toContain("1.5 Rep Squat");
-    expect(names).not.toContain("18 Inch Deadlift");
+    expect(calls[0].url).toContain("search=bench%20press");
+    expect(body.data.map((e) => e.name)).toEqual([
+      "Barbell Bench Press",
+      "Dumbbell Bench Press",
+    ]);
   });
 
   it("returns 500 when EXERCISEAPI_KEY is missing", async () => {
@@ -120,10 +97,14 @@ describe("GET /api/search-exercises", () => {
     expect(res.status).toBe(500);
   });
 
-  it("handles empty query without crashing", async () => {
-    const catalog: ApiExercise[] = [exercise({ id: "1", name: "Squat" })];
-    mockFetch(() => ({
-      body: { data: catalog, total: 1, limit: 100, offset: 0 },
+  it("handles an empty query by omitting ?search= from the upstream call", async () => {
+    const { calls } = mockFetch(() => ({
+      body: {
+        data: [exercise({ id: "1", name: "Squat" })],
+        total: 2198,
+        limit: 20,
+        offset: 0,
+      },
     }));
 
     const { GET } = await import("./route");
@@ -132,5 +113,6 @@ describe("GET /api/search-exercises", () => {
     expect(res.status).toBe(200);
     const body = (await res.json()) as { data: ApiExercise[] };
     expect(Array.isArray(body.data)).toBe(true);
+    expect(calls[0].url).not.toContain("search=");
   });
 });
