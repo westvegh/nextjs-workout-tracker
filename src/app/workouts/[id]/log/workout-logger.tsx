@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { QuickWeightButtons } from "@/components/quick-weight-buttons";
 import { RestTimerBanner } from "@/components/rest-timer-banner";
+import { SwipeDeleteRow } from "@/components/swipe-delete-row";
 import {
   finishWorkout,
   upsertSets,
@@ -421,8 +422,9 @@ export function WorkoutLogger({
                       <li
                         key={s.id ?? `new-${idx}`}
                         data-set-row={`${ex.id}:${idx}`}
-                        className="flex flex-col gap-2 px-4 py-3"
                       >
+                        <SwipeDeleteRow onDelete={() => removeSet(ex.id, idx)}>
+                        <div className="flex flex-col gap-2 px-4 py-3">
                         <div className="grid grid-cols-[auto_1fr_auto_1fr_auto_auto] items-center gap-2 sm:grid-cols-[auto_120px_80px_120px_auto_auto]">
                           <span className="w-8 text-sm text-muted-foreground">
                             #{s.set_number}
@@ -510,6 +512,8 @@ export function WorkoutLogger({
                           disabled={s.is_completed}
                           className="pl-10 sm:pl-10"
                         />
+                        </div>
+                        </SwipeDeleteRow>
                       </li>
                     );
                   })}
