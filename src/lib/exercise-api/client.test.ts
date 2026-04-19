@@ -101,8 +101,9 @@ describe("exercise-api/client", () => {
       const { fetchExercises } = await importClient();
       await fetchExercises();
 
-      const [, init] = fetchMock.mock.calls[0];
-      const headers = (init as RequestInit).headers as Record<string, string>;
+      const call = fetchMock.mock.calls[0] as unknown as [unknown, RequestInit];
+      const init = call[1];
+      const headers = init.headers as Record<string, string>;
       expect(headers["X-API-Key"]).toBe("test-key");
     });
 
