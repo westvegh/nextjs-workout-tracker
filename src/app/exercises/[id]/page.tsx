@@ -5,6 +5,7 @@ import { createClient } from "@/lib/supabase/server";
 import { Badge } from "@/components/badge";
 import { Button } from "@/components/ui/button";
 import { SetupBanner } from "@/components/setup-banner";
+import { DemoFooterCta } from "@/components/demo-footer-cta";
 
 type Params = Promise<{ id: string }>;
 
@@ -145,8 +146,8 @@ export default async function ExerciseDetailPage({
               className="w-full rounded-lg border bg-muted"
             />
           ) : (
-            <div className="flex aspect-video items-center justify-center rounded-lg border bg-muted text-sm text-muted-foreground">
-              No media available
+            <div className="flex aspect-video items-center justify-center rounded-lg bg-muted text-sm text-muted-foreground">
+              Video coming soon
             </div>
           )}
         </div>
@@ -203,6 +204,7 @@ export default async function ExerciseDetailPage({
           ) : null}
         </aside>
       </div>
+      <DemoFooterCta />
     </main>
   );
 }
