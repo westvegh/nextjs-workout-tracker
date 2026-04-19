@@ -21,6 +21,7 @@ export default async function NewWorkoutPage({
           name: ex.name,
           muscle: ex.primaryMuscles[0] ?? null,
           equipment: ex.equipment,
+          videoUrl: ex.videos?.[0]?.url ?? null,
         };
       }
     } catch {

@@ -35,6 +35,7 @@ import { getStore } from "@/lib/workout-store";
 
 interface RowState extends PendingExercise {
   localId: string;
+  videoUrl?: string | null;
 }
 
 function today(): string {
@@ -53,6 +54,7 @@ function rowFromPicker(picker: PickerResult, defaultSets: number): RowState {
     muscle: picker.muscle,
     equipment: picker.equipment,
     default_sets: defaultSets,
+    videoUrl: picker.videoUrl ?? null,
   };
 }
 
@@ -107,6 +109,24 @@ function SortableRow({ row, index, onRemove, onSetsChange }: SortableRowProps) {
       <span className="w-6 text-right text-sm text-muted-foreground">
         {index + 1}
       </span>
+      <div
+        className="h-10 w-14 shrink-0 overflow-hidden rounded-md bg-muted"
+        aria-hidden
+      >
+        {row.videoUrl ? (
+          <video
+            src={row.videoUrl}
+            muted
+            playsInline
+            preload="metadata"
+            className="h-full w-full object-cover"
+          />
+        ) : (
+          <div className="flex h-full w-full items-center justify-center text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+            {row.exercise_name.slice(0, 2)}
+          </div>
+        )}
+      </div>
       <div className="min-w-0 flex-1">
         <div className="truncate font-medium">{row.exercise_name}</div>
         <div className="mt-1 flex flex-wrap gap-1.5">

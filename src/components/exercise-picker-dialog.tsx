@@ -19,6 +19,7 @@ export interface PickerResult {
   name: string;
   muscle: string | null;
   equipment: string | null;
+  videoUrl?: string | null;
 }
 
 interface ExercisePickerDialogProps {
@@ -77,6 +78,7 @@ export function ExercisePickerDialog({
       name: ex.name,
       muscle: ex.primaryMuscles[0] ?? null,
       equipment: ex.equipment,
+      videoUrl: ex.videos?.[0]?.url ?? null,
     });
     setOpen(false);
     setQuery("");
