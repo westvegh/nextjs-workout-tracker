@@ -7,7 +7,9 @@ import { createClient } from "@/lib/supabase/server";
 import type {
   CreateWorkoutInput,
   SetInput,
+  Workout,
   WorkoutStatus,
+  WorkoutWithChildren,
 } from "@/lib/workout-store";
 import { SupabaseStore } from "@/lib/workout-store-supabase";
 
@@ -34,11 +36,33 @@ export async function createWorkout(input: CreateWorkoutInput): Promise<string> 
   return id;
 }
 
+export async function listWorkouts(): Promise<
+  Array<Workout & { exercise_count: number }>
+> {
+  const store = await getStore();
+  return store.listWorkouts();
+}
+
+export async function getWorkout(
+  id: string
+): Promise<WorkoutWithChildren | null> {
+  const store = await getStore();
+  return store.getWorkout(id);
+}
+
 export async function deleteWorkout(id: string): Promise<void> {
   const store = await getStore();
   await store.deleteWorkout(id);
   revalidatePath("/workouts");
   redirect("/workouts");
+}
+
+// Variant that doesn't redirect — for client-side callers that want to handle
+// navigation themselves (e.g., client components driven by the RemoteStore).
+export async function deleteWorkoutNoRedirect(id: string): Promise<void> {
+  const store = await getStore();
+  await store.deleteWorkout(id);
+  revalidatePath("/workouts");
 }
 
 export async function setWorkoutStatus(
@@ -63,4 +87,9 @@ export async function upsertSets(
 export async function finishWorkout(id: string): Promise<void> {
   await setWorkoutStatus(id, "completed");
   redirect(`/workouts/${id}`);
+}
+
+// Client-caller-friendly finish: stamp status without the server redirect.
+export async function finishWorkoutNoRedirect(id: string): Promise<void> {
+  await setWorkoutStatus(id, "completed");
 }

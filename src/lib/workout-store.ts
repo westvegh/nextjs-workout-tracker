@@ -120,3 +120,41 @@ export class StoreError extends Error {
     }
   }
 }
+
+/**
+ * Probe whether localStorage is usable right now. Returns false for Safari
+ * private mode, for SSR (no globalThis.localStorage), and for any env where
+ * setItem throws. Safe to call repeatedly.
+ */
+export function isStorageAvailable(): boolean {
+  try {
+    if (typeof globalThis === "undefined" || typeof globalThis.localStorage === "undefined") {
+      return false;
+    }
+    const probe = "__wt_probe__";
+    globalThis.localStorage.setItem(probe, "1");
+    globalThis.localStorage.removeItem(probe);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Factory: picks the right WorkoutStore for the caller's auth state.
+ *
+ * Called from client components only (workouts pages are "use client"). For
+ * signed-in users we return a RemoteStore that proxies through server actions;
+ * we cannot instantiate SupabaseStore directly here because that needs
+ * `await createClient()` from `@/lib/supabase/server`, which is server-only.
+ */
+export async function getStore(userId: string | null | undefined): Promise<WorkoutStore> {
+  if (userId) {
+    const { RemoteStore } = await import("./workout-store-remote");
+    return new RemoteStore();
+  }
+  const { LocalStore } = await import("./workout-store-local");
+  const store = new LocalStore();
+  store.seedIfEmpty();
+  return store;
+}
