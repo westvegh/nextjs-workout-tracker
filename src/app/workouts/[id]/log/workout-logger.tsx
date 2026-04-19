@@ -8,6 +8,7 @@ import { Badge } from "@/components/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { QuickWeightButtons } from "@/components/quick-weight-buttons";
+import { RestTimerBanner } from "@/components/rest-timer-banner";
 import {
   finishWorkout,
   upsertSets,
@@ -105,6 +106,8 @@ export function WorkoutLogger({
   const [previous, setPrevious] = useState<
     Record<string, PreviousPerformance | null>
   >({});
+  // Rest timer: started_at epoch ms (or null when not running).
+  const [restStartedAt, setRestStartedAt] = useState<number | null>(null);
 
   // Look up previous-performance hints for each exercise on mount.
   // Fire-and-forget; empty hints just skip rendering the placeholder.
@@ -149,17 +152,58 @@ export function WorkoutLogger({
   ) {
     setSaved(false);
     setExercises((prev) =>
-      prev.map((ex) =>
-        ex.id === exerciseId
-          ? {
-              ...ex,
-              sets: ex.sets.map((s, i) =>
-                i === setIdx ? { ...s, ...patch } : s
-              ),
+      prev.map((ex) => {
+        if (ex.id !== exerciseId) return ex;
+        return {
+          ...ex,
+          sets: ex.sets.map((s, i) => {
+            if (i !== setIdx) return s;
+            // Rest-timer auto-dismiss: if an empty weight field gets its
+            // first character entered, the user is starting the next set.
+            if (
+              patch.weight !== undefined &&
+              s.weight.trim() === "" &&
+              patch.weight.trim() !== "" &&
+              !s.is_completed
+            ) {
+              setRestStartedAt(null);
             }
-          : ex
-      )
+            return { ...s, ...patch };
+          }),
+        };
+      })
     );
+  }
+
+  function toggleComplete(exerciseId: string, setIdx: number) {
+    setSaved(false);
+    let justCompleted = false;
+    setExercises((prev) =>
+      prev.map((ex) => {
+        if (ex.id !== exerciseId) return ex;
+        return {
+          ...ex,
+          sets: ex.sets.map((s, i) => {
+            if (i !== setIdx) return s;
+            const next = !s.is_completed;
+            if (next) justCompleted = true;
+            return { ...s, is_completed: next };
+          }),
+        };
+      })
+    );
+    if (justCompleted) {
+      // Start a fresh rest timer. navigator.vibrate is ignored on iOS + desktop
+      // (no-op) and produces a ~30ms buzz on Android.
+      setRestStartedAt(Date.now());
+      if (typeof navigator !== "undefined" && "vibrate" in navigator) {
+        try {
+          navigator.vibrate(30);
+        } catch {
+          // Some mobile browsers gate vibrate behind engagement; ignore.
+        }
+      }
+    }
   }
 
   function addSet(exerciseId: string) {
@@ -380,11 +424,7 @@ export function WorkoutLogger({
                             type="button"
                             variant={s.is_completed ? "default" : "outline"}
                             size="icon"
-                            onClick={() =>
-                              updateSet(ex.id, idx, {
-                                is_completed: !s.is_completed,
-                              })
-                            }
+                            onClick={() => toggleComplete(ex.id, idx)}
                             aria-label={
                               s.is_completed ? "Mark incomplete" : "Mark done"
                             }
@@ -438,7 +478,14 @@ export function WorkoutLogger({
         <p className="mt-6 text-sm text-muted-foreground">Saved.</p>
       ) : null}
 
-      <div className="sticky bottom-4 mt-10 flex flex-wrap justify-end gap-3 rounded-lg border bg-background/90 p-3 backdrop-blur">
+      {restStartedAt !== null ? (
+        <RestTimerBanner
+          startedAt={restStartedAt}
+          onDismiss={() => setRestStartedAt(null)}
+        />
+      ) : null}
+
+      <div className="sticky bottom-4 mt-4 flex flex-wrap justify-end gap-3 rounded-lg border bg-background/90 p-3 backdrop-blur">
         <Button
           variant="outline"
           onClick={handleSave}
