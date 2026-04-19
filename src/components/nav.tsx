@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { UserMenu } from "@/components/user-menu";
 import { NavCta } from "@/components/nav-cta";
+import { ThemeToggle } from "@/components/theme-toggle";
 import { createClient } from "@/lib/supabase/server";
 
 export async function Nav() {
@@ -44,6 +45,7 @@ export async function Nav() {
         </div>
         <div className="flex items-center gap-2">
           <NavCta isSignedIn={isSignedIn} />
+          <ThemeToggle />
           {email ? <UserMenu email={email} /> : null}
         </div>
       </div>
