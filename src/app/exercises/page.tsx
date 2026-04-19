@@ -1,9 +1,13 @@
 import {
   fetchCategories,
   fetchEquipment,
-  fetchExercises,
   fetchMuscles,
 } from "@/lib/exercise-api/client";
+import {
+  fetchExercisesThrough,
+  searchAndPaginate,
+} from "@/lib/exercise-search";
+import type { ApiExercise } from "@/lib/exercise-api/types";
 import { ExerciseBrowser } from "@/components/exercise-browser";
 import { SetupBanner } from "@/components/setup-banner";
 import { DemoFooterCta } from "@/components/demo-footer-cta";
@@ -60,7 +64,7 @@ export default async function ExercisesPage({
     );
   }
 
-  let initialExercises: Awaited<ReturnType<typeof fetchExercises>>["data"] = [];
+  let initialExercises: ApiExercise[] = [];
   let total: number | null = null;
   let muscles: string[] = [];
   let equipment: string[] = [];
@@ -68,27 +72,38 @@ export default async function ExercisesPage({
   let loadError: string | null = null;
 
   try {
+    // Any active filter goes through the local Fuse-backed search (upstream
+    // search param is broken). No filters → direct API passthrough.
+    const hasAnyFilter = !!(
+      params.search ||
+      params.muscle ||
+      params.equipment ||
+      params.category ||
+      hasVideoFilter
+    );
+    const exercisesPromise = hasAnyFilter
+      ? searchAndPaginate(
+          {
+            search: params.search,
+            muscle: params.muscle,
+            equipment: params.equipment,
+            category: params.category,
+            hasVideo: hasVideoFilter,
+          },
+          PAGE_SIZE,
+          0
+        )
+      : fetchExercisesThrough(PAGE_SIZE, 0);
+
     const [exercisesResp, musclesResp, equipmentResp, categoriesResp] =
       await Promise.all([
-        fetchExercises({
-          // Over-fetch when has-video so we can filter client-side.
-          limit: hasVideoFilter ? HAS_VIDEO_FETCH_LIMIT : PAGE_SIZE,
-          offset: 0,
-          search: params.search,
-          muscle: params.muscle,
-          equipment: params.equipment,
-          category: params.category,
-        }),
+        exercisesPromise,
         fetchMuscles(),
         fetchEquipment(),
         fetchCategories(),
       ]);
     total = exercisesResp.total;
-    initialExercises = hasVideoFilter
-      ? exercisesResp.data
-          .filter((ex) => Array.isArray(ex.videos) && ex.videos.length > 0)
-          .slice(0, PAGE_SIZE)
-      : exercisesResp.data.slice(0, PAGE_SIZE);
+    initialExercises = exercisesResp.data.slice(0, PAGE_SIZE);
     muscles = musclesResp;
     equipment = equipmentResp;
     categories = categoriesResp;

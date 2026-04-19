@@ -82,15 +82,15 @@ export interface FetchExercisesParams {
 export async function fetchExercises(
   params: FetchExercisesParams = {}
 ): Promise<ApiListResponse<ApiExercise>> {
-  // The API param for search is `q`; keep the client-facing field as `search`
-  // for readability but map it here so the URL uses `q=...`.
+  // The exerciseapi.dev /exercises endpoint uses `search=` for full-text
+  // query. `q=` is rejected with 500 INTERNAL_ERROR. Verified 2026-04-19.
   const query = buildQuery({
     limit: params.limit ?? PAGE_SIZE,
     offset: params.offset ?? 0,
     muscle: params.muscle,
     equipment: params.equipment,
     category: params.category,
-    q: params.search,
+    search: params.search,
   });
   const response = await fetchWithRetry(`${BASE_URL}/exercises${query}`, {
     headers: headers(),

@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { fetchExercises } from "@/lib/exercise-api/client";
+import { searchAndPaginate, fetchExercisesThrough } from "@/lib/exercise-search";
 
 const PAGE_SIZE = 24;
 const HAS_VIDEO_FETCH_LIMIT = 100;
@@ -42,20 +42,22 @@ export async function GET(request: Request) {
   const category = searchParams.get("category") ?? undefined;
 
   try {
-    const result = await fetchExercises({
-      limit,
-      offset,
-      search: search || undefined,
-      muscle: muscle || undefined,
-      equipment: equipment || undefined,
-      category: category || undefined,
+    // When any filter is active, use Fuse-backed catalog search (the upstream
+    // API's search param is silently broken). Otherwise passthrough.
+    const needsLocal = !!(search || muscle || equipment || category || hasVideoFilter);
+    if (needsLocal) {
+      const result = await searchAndPaginate(
+        { search, muscle, equipment, category, hasVideo: hasVideoFilter },
+        PAGE_SIZE,
+        offset
+      );
+      return NextResponse.json({ data: result.data, total: result.total });
+    }
+    const result = await fetchExercisesThrough(limit, offset);
+    return NextResponse.json({
+      data: result.data.slice(0, PAGE_SIZE),
+      total: result.total,
     });
-    const data = hasVideoFilter
-      ? result.data
-          .filter((ex) => Array.isArray(ex.videos) && ex.videos.length > 0)
-          .slice(0, PAGE_SIZE)
-      : result.data.slice(0, PAGE_SIZE);
-    return NextResponse.json({ data });
   } catch (error) {
     const message =
       error instanceof Error ? error.message : "List failed";

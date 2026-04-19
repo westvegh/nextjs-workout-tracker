@@ -40,7 +40,10 @@ describe("exercise-api/client", () => {
   });
 
   describe("fetchExercises", () => {
-    it("REGRESSION: maps search= to q= in the URL", async () => {
+    it("REGRESSION: uses search= param (API rejects q= with 500)", async () => {
+      // Yesterday's fix incorrectly mapped search→q. The exerciseapi.dev API
+      // actually accepts search= and returns 500 INTERNAL_ERROR on q=. Keep
+      // this test so the regression doesn't recur.
       const fetchMock = vi.fn(async () =>
         jsonResponse({ data: [], total: 0, limit: 100, offset: 0 })
       );
@@ -50,8 +53,8 @@ describe("exercise-api/client", () => {
       await fetchExercises({ search: "bench" });
 
       const url = lastUrl(fetchMock);
-      expect(url).toContain("q=bench");
-      expect(url).not.toContain("search=bench");
+      expect(url).toContain("search=bench");
+      expect(url).not.toContain("q=bench");
     });
 
     it("URL-encodes search values", async () => {
@@ -63,7 +66,7 @@ describe("exercise-api/client", () => {
       const { fetchExercises } = await importClient();
       await fetchExercises({ search: "bench press" });
 
-      expect(lastUrl(fetchMock)).toContain("q=bench%20press");
+      expect(lastUrl(fetchMock)).toContain("search=bench%20press");
     });
 
     it("passes muscle= through untouched", async () => {
