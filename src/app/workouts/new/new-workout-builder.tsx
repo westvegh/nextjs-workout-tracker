@@ -2,7 +2,25 @@
 
 import { useRouter } from "next/navigation";
 import { useEffect, useState, useTransition } from "react";
-import { ArrowDown, ArrowUp, Trash2 } from "lucide-react";
+import { GripVertical, Trash2 } from "lucide-react";
+import {
+  closestCenter,
+  DndContext,
+  KeyboardSensor,
+  PointerSensor,
+  TouchSensor,
+  useSensor,
+  useSensors,
+  type DragEndEvent,
+} from "@dnd-kit/core";
+import {
+  arrayMove,
+  SortableContext,
+  sortableKeyboardCoordinates,
+  useSortable,
+  verticalListSortingStrategy,
+} from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -27,14 +45,14 @@ function today(): string {
   return `${year}-${month}-${day}`;
 }
 
-function rowFromPicker(picker: PickerResult): RowState {
+function rowFromPicker(picker: PickerResult, defaultSets: number): RowState {
   return {
     localId: crypto.randomUUID(),
     exercise_id: picker.id,
     exercise_name: picker.name,
     muscle: picker.muscle,
     equipment: picker.equipment,
-    default_sets: 3,
+    default_sets: defaultSets,
   };
 }
 
@@ -42,16 +60,117 @@ interface NewWorkoutBuilderProps {
   prefill: PickerResult | null;
 }
 
+const QUICK_TEMPLATES: Array<{ label: string; sets: number }> = [
+  { label: "3 x 10", sets: 3 },
+  { label: "5 x 5", sets: 5 },
+  { label: "4 x 8", sets: 4 },
+];
+
+interface SortableRowProps {
+  row: RowState;
+  index: number;
+  onRemove: (localId: string) => void;
+  onSetsChange: (localId: string, value: number) => void;
+}
+
+function SortableRow({ row, index, onRemove, onSetsChange }: SortableRowProps) {
+  const {
+    attributes,
+    listeners,
+    setNodeRef,
+    transform,
+    transition,
+    isDragging,
+  } = useSortable({ id: row.localId });
+
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    opacity: isDragging ? 0.5 : 1,
+  };
+
+  return (
+    <li
+      ref={setNodeRef}
+      style={style}
+      className="flex items-center gap-3 p-4"
+    >
+      <button
+        type="button"
+        {...attributes}
+        {...listeners}
+        className="flex h-11 w-8 touch-none items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+        aria-label={`Drag to reorder ${row.exercise_name}`}
+      >
+        <GripVertical className="h-4 w-4" />
+      </button>
+      <span className="w-6 text-right text-sm text-muted-foreground">
+        {index + 1}
+      </span>
+      <div className="min-w-0 flex-1">
+        <div className="truncate font-medium">{row.exercise_name}</div>
+        <div className="mt-1 flex flex-wrap gap-1.5">
+          {row.muscle ? <Badge variant="default">{row.muscle}</Badge> : null}
+          {row.equipment ? (
+            <Badge variant="outline">{row.equipment}</Badge>
+          ) : null}
+        </div>
+      </div>
+      <div className="flex items-center gap-2">
+        <Label
+          htmlFor={`sets-${row.localId}`}
+          className="text-xs text-muted-foreground"
+        >
+          Sets
+        </Label>
+        <Input
+          id={`sets-${row.localId}`}
+          type="number"
+          min={1}
+          max={20}
+          value={row.default_sets}
+          onChange={(event) =>
+            onSetsChange(row.localId, Number(event.target.value))
+          }
+          className="h-8 w-16"
+        />
+      </div>
+      <Button
+        type="button"
+        variant="ghost"
+        size="icon"
+        onClick={() => onRemove(row.localId)}
+        aria-label="Remove"
+      >
+        <Trash2 className="h-4 w-4" />
+      </Button>
+    </li>
+  );
+}
+
 export function NewWorkoutBuilder({ prefill }: NewWorkoutBuilderProps) {
   const router = useRouter();
   const [name, setName] = useState("");
   const [date, setDate] = useState(today());
+  // Default-sets value for the NEXT added exercise. Quick-template chips set
+  // this; 3 is the sane default that matches the original behavior.
+  const [defaultSets, setDefaultSets] = useState(3);
   const [rows, setRows] = useState<RowState[]>(
-    prefill ? [rowFromPicker(prefill)] : []
+    prefill ? [rowFromPicker(prefill, 3)] : []
   );
   const [error, setError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
   const [userId, setUserId] = useState<string | null>(null);
+
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
+    useSensor(TouchSensor, {
+      activationConstraint: { delay: 150, tolerance: 5 },
+    }),
+    useSensor(KeyboardSensor, {
+      coordinateGetter: sortableKeyboardCoordinates,
+    })
+  );
 
   useEffect(() => {
     const hasEnv =
@@ -73,23 +192,11 @@ export function NewWorkoutBuilder({ prefill }: NewWorkoutBuilderProps) {
   }, []);
 
   function addExercise(picker: PickerResult) {
-    setRows((prev) => [...prev, rowFromPicker(picker)]);
+    setRows((prev) => [...prev, rowFromPicker(picker, defaultSets)]);
   }
 
   function removeRow(localId: string) {
     setRows((prev) => prev.filter((r) => r.localId !== localId));
-  }
-
-  function moveRow(localId: string, direction: -1 | 1) {
-    setRows((prev) => {
-      const idx = prev.findIndex((r) => r.localId === localId);
-      if (idx < 0) return prev;
-      const target = idx + direction;
-      if (target < 0 || target >= prev.length) return prev;
-      const next = [...prev];
-      [next[idx], next[target]] = [next[target], next[idx]];
-      return next;
-    });
   }
 
   function updateSets(localId: string, value: number) {
@@ -101,6 +208,19 @@ export function NewWorkoutBuilder({ prefill }: NewWorkoutBuilderProps) {
       )
     );
   }
+
+  function handleDragEnd(event: DragEndEvent) {
+    const { active, over } = event;
+    if (!over || active.id === over.id) return;
+    setRows((prev) => {
+      const from = prev.findIndex((r) => r.localId === active.id);
+      const to = prev.findIndex((r) => r.localId === over.id);
+      if (from < 0 || to < 0) return prev;
+      return arrayMove(prev, from, to);
+    });
+  }
+
+  const totalSets = rows.reduce((sum, r) => sum + r.default_sets, 0);
 
   function handleSave() {
     setError(null);
@@ -129,7 +249,7 @@ export function NewWorkoutBuilder({ prefill }: NewWorkoutBuilderProps) {
   }
 
   return (
-    <main className="mx-auto w-full max-w-3xl flex-1 px-6 py-12">
+    <main className="mx-auto w-full max-w-3xl flex-1 px-4 py-10 sm:px-6 sm:py-12">
       <h1 className="text-3xl font-semibold tracking-tight">New workout</h1>
       <p className="mt-1 text-sm text-muted-foreground">
         Build a plan, then log sets when you&apos;re training.
@@ -159,11 +279,62 @@ export function NewWorkoutBuilder({ prefill }: NewWorkoutBuilderProps) {
       </div>
 
       <div className="mt-10">
-        <div className="flex items-end justify-between">
+        <div className="flex flex-wrap items-end justify-between gap-2">
           <h2 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
             Exercises
           </h2>
-          <ExercisePickerDialog onAdd={addExercise} />
+          <p
+            className="font-mono text-xs text-muted-foreground"
+            aria-live="polite"
+          >
+            {rows.length} {rows.length === 1 ? "exercise" : "exercises"} &middot;{" "}
+            {totalSets} {totalSets === 1 ? "set" : "sets"}
+          </p>
+        </div>
+
+        <div className="mt-3 flex flex-wrap items-center gap-2">
+          <span className="text-xs text-muted-foreground">Next:</span>
+          {QUICK_TEMPLATES.map((t) => (
+            <button
+              key={t.label}
+              type="button"
+              onClick={() => setDefaultSets(t.sets)}
+              aria-pressed={defaultSets === t.sets}
+              className={
+                "h-8 rounded-md border px-3 text-xs font-medium transition-colors " +
+                (defaultSets === t.sets
+                  ? "border-foreground bg-foreground text-background"
+                  : "border-input bg-transparent text-muted-foreground hover:bg-accent hover:text-foreground")
+              }
+            >
+              {t.label}
+            </button>
+          ))}
+          <div className="flex items-center gap-1">
+            <Label
+              htmlFor="custom-default-sets"
+              className="text-xs text-muted-foreground"
+            >
+              Custom
+            </Label>
+            <Input
+              id="custom-default-sets"
+              type="number"
+              min={1}
+              max={20}
+              value={defaultSets}
+              onChange={(event) =>
+                setDefaultSets(
+                  Math.max(1, Math.min(20, Number(event.target.value) || 1))
+                )
+              }
+              className="h-8 w-14"
+              aria-label="Custom default sets"
+            />
+          </div>
+          <div className="ml-auto">
+            <ExercisePickerDialog onAdd={addExercise} />
+          </div>
         </div>
 
         {rows.length === 0 ? (
@@ -173,81 +344,28 @@ export function NewWorkoutBuilder({ prefill }: NewWorkoutBuilderProps) {
             </p>
           </div>
         ) : (
-          <ol className="mt-4 divide-y rounded-lg border bg-card">
-            {rows.map((row, idx) => (
-              <li
-                key={row.localId}
-                className="flex items-center gap-3 p-4"
-              >
-                <span className="w-6 text-right text-sm text-muted-foreground">
-                  {idx + 1}
-                </span>
-                <div className="min-w-0 flex-1">
-                  <div className="truncate font-medium">
-                    {row.exercise_name}
-                  </div>
-                  <div className="mt-1 flex flex-wrap gap-1.5">
-                    {row.muscle ? (
-                      <Badge variant="default">{row.muscle}</Badge>
-                    ) : null}
-                    {row.equipment ? (
-                      <Badge variant="outline">{row.equipment}</Badge>
-                    ) : null}
-                  </div>
-                </div>
-                <div className="flex items-center gap-2">
-                  <Label
-                    htmlFor={`sets-${row.localId}`}
-                    className="text-xs text-muted-foreground"
-                  >
-                    Sets
-                  </Label>
-                  <Input
-                    id={`sets-${row.localId}`}
-                    type="number"
-                    min={1}
-                    max={20}
-                    value={row.default_sets}
-                    onChange={(event) =>
-                      updateSets(row.localId, Number(event.target.value))
-                    }
-                    className="h-8 w-16"
+          <DndContext
+            sensors={sensors}
+            collisionDetection={closestCenter}
+            onDragEnd={handleDragEnd}
+          >
+            <SortableContext
+              items={rows.map((r) => r.localId)}
+              strategy={verticalListSortingStrategy}
+            >
+              <ol className="mt-4 divide-y rounded-lg border bg-card">
+                {rows.map((row, idx) => (
+                  <SortableRow
+                    key={row.localId}
+                    row={row}
+                    index={idx}
+                    onRemove={removeRow}
+                    onSetsChange={updateSets}
                   />
-                </div>
-                <div className="flex items-center gap-1">
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="icon"
-                    onClick={() => moveRow(row.localId, -1)}
-                    disabled={idx === 0}
-                    aria-label="Move up"
-                  >
-                    <ArrowUp className="h-4 w-4" />
-                  </Button>
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="icon"
-                    onClick={() => moveRow(row.localId, 1)}
-                    disabled={idx === rows.length - 1}
-                    aria-label="Move down"
-                  >
-                    <ArrowDown className="h-4 w-4" />
-                  </Button>
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="icon"
-                    onClick={() => removeRow(row.localId)}
-                    aria-label="Remove"
-                  >
-                    <Trash2 className="h-4 w-4" />
-                  </Button>
-                </div>
-              </li>
-            ))}
-          </ol>
+                ))}
+              </ol>
+            </SortableContext>
+          </DndContext>
         )}
       </div>
 
