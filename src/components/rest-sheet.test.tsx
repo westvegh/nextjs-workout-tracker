@@ -53,6 +53,13 @@ describe("RestSheet", () => {
     expect(onSkip).toHaveBeenCalledOnce();
   });
 
+  it("invokes onSkip when the dismiss X is clicked", () => {
+    const onSkip = vi.fn();
+    render(<RestSheet {...defaultProps({ onSkip })} />);
+    fireEvent.click(screen.getByRole("button", { name: /dismiss rest timer/i }));
+    expect(onSkip).toHaveBeenCalledOnce();
+  });
+
   it("calls onAdjust with +15 / +30 / -15 when the pills are clicked", () => {
     const onAdjust = vi.fn();
     render(<RestSheet {...defaultProps({ onAdjust })} />);

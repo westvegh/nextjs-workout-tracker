@@ -12,6 +12,7 @@
  */
 
 import { useEffect, useState } from "react";
+import { X } from "lucide-react";
 import { MiniRing } from "./mini-ring";
 
 const WARNING_AT_SECONDS = 180;
@@ -69,7 +70,16 @@ export function RestSheet({
       data-testid="rest-sheet"
       className="fixed inset-x-4 bottom-24 z-30 rounded-2xl border bg-card p-4 shadow-[0_-10px_40px_rgba(0,0,0,.4)] sm:left-auto sm:right-6 sm:bottom-24 sm:w-80"
     >
-      <div className="flex items-center gap-3">
+      <button
+        type="button"
+        onClick={onSkip}
+        aria-label="Dismiss rest timer"
+        data-testid="rest-sheet-dismiss"
+        className="absolute right-2 top-2 inline-flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground transition hover:bg-secondary hover:text-foreground"
+      >
+        <X className="h-3.5 w-3.5" />
+      </button>
+      <div className="flex items-center gap-3 pr-6">
         <span className={ringColorClass + " relative shrink-0"}>
           <MiniRing size={56} stroke={4} progress={progress} />
           <span className="pointer-events-none absolute inset-0 flex items-center justify-center">
