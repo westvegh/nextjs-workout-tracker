@@ -1,5 +1,9 @@
 import Fuse, { type IFuseOptions } from "fuse.js";
-import { fetchAllExercises, fetchExercises } from "./exercise-api/client";
+import {
+  fetchAllExercises,
+  fetchExercises,
+  fetchMuscleGroups,
+} from "./exercise-api/client";
 import type { ApiExercise } from "./exercise-api/types";
 
 // exerciseapi.dev's /exercises?search= param is silently broken (returns
@@ -28,6 +32,11 @@ let catalogPromise: Promise<ApiExercise[]> | null = null;
 let fuseInstance: Fuse<ApiExercise> | null = null;
 let fuseBuiltFor: ApiExercise[] | null = null;
 
+// displayGroup (lowercased) → specific muscle names (lowercased).
+// e.g., "adductors" → ["gracilis", "adductor longus", "adductor magnus"]
+let muscleGroupsCache: Record<string, string[]> | null = null;
+let muscleGroupsPromise: Promise<Record<string, string[]>> | null = null;
+
 async function getCatalog(): Promise<ApiExercise[]> {
   if (catalogCache) return catalogCache;
   if (catalogPromise) return catalogPromise;
@@ -42,6 +51,28 @@ async function getCatalog(): Promise<ApiExercise[]> {
       throw err;
     });
   return catalogPromise;
+}
+
+async function getMuscleGroups(): Promise<Record<string, string[]>> {
+  if (muscleGroupsCache) return muscleGroupsCache;
+  if (muscleGroupsPromise) return muscleGroupsPromise;
+  muscleGroupsPromise = fetchMuscleGroups()
+    .then((groups) => {
+      const map: Record<string, string[]> = {};
+      for (const g of groups) {
+        map[g.displayGroup.toLowerCase()] = g.muscles.map((m) =>
+          m.toLowerCase()
+        );
+      }
+      muscleGroupsCache = map;
+      muscleGroupsPromise = null;
+      return map;
+    })
+    .catch((err) => {
+      muscleGroupsPromise = null;
+      throw err;
+    });
+  return muscleGroupsPromise;
 }
 
 function getOrBuildIndex(catalog: ApiExercise[]): Fuse<ApiExercise> {
@@ -60,18 +91,31 @@ export interface SearchFilters {
   hasVideo?: boolean;
 }
 
-function applyStructuredFilters(
+export function applyStructuredFilters(
   items: ApiExercise[],
-  filters: SearchFilters
+  filters: SearchFilters,
+  muscleGroupMap: Record<string, string[]> | null
 ): ApiExercise[] {
   return items.filter((ex) => {
     if (filters.hasVideo && !(ex.videos && ex.videos.length > 0)) return false;
     if (filters.muscle) {
-      const all = [
+      const filterMuscle = filters.muscle.toLowerCase();
+      const exerciseMuscles = [
         ...(ex.primaryMuscles ?? []),
         ...(ex.secondaryMuscles ?? []),
       ].map((m) => m.toLowerCase());
-      if (!all.some((m) => m.includes(filters.muscle!.toLowerCase()))) {
+
+      // Prefer the resolved displayGroup → specific-names mapping. The /muscles
+      // endpoint returns groups like "adductors" with muscle names like
+      // "gracilis"; exercises only carry the specific names. Without the map we
+      // fall back to substring so an unknown group (missing from the API or
+      // passed by a legacy caller) doesn't silently drop every exercise.
+      const specificNames = muscleGroupMap?.[filterMuscle];
+      if (specificNames && specificNames.length > 0) {
+        if (!exerciseMuscles.some((m) => specificNames.includes(m))) {
+          return false;
+        }
+      } else if (!exerciseMuscles.some((m) => m.includes(filterMuscle))) {
         return false;
       }
     }
@@ -100,7 +144,11 @@ export async function searchAndPaginate(
   limit: number,
   offset: number
 ): Promise<{ data: ApiExercise[]; total: number }> {
-  const catalog = await getCatalog();
+  // Resolve both caches up front so the filter itself stays sync and pure.
+  const [catalog, muscleGroupMap] = await Promise.all([
+    getCatalog(),
+    filters.muscle ? getMuscleGroups() : Promise.resolve(null),
+  ]);
 
   let base: ApiExercise[];
   const q = filters.search?.trim();
@@ -111,7 +159,7 @@ export async function searchAndPaginate(
     base = catalog;
   }
 
-  const filtered = applyStructuredFilters(base, filters);
+  const filtered = applyStructuredFilters(base, filters, muscleGroupMap);
   return {
     data: filtered.slice(offset, offset + limit),
     total: filtered.length,
@@ -132,6 +180,14 @@ export async function fetchExercisesThrough(
 
 export function invalidateCatalog(): void {
   catalogCache = null;
+  catalogPromise = null;
   fuseInstance = null;
   fuseBuiltFor = null;
+}
+
+// Required for test isolation: the module-level muscle-group cache would
+// otherwise leak across test cases in the same file.
+export function invalidateMuscleGroups(): void {
+  muscleGroupsCache = null;
+  muscleGroupsPromise = null;
 }

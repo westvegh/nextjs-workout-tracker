@@ -164,6 +164,36 @@ export async function fetchMuscles(): Promise<string[]> {
   return normalizeToStrings(await fetchList("muscles"));
 }
 
+export interface MuscleGroup {
+  displayGroup: string;
+  muscles: string[];
+}
+
+/**
+ * Returns the raw /muscles payload with display groups AND their specific
+ * muscle names (e.g., "adductors" → ["gracilis", "adductor longus", ...]).
+ * The chip UI uses fetchMuscles() for display; filtering logic needs the
+ * full mapping to translate a chip value into the list of muscles that
+ * actually appear on exercises.
+ */
+export async function fetchMuscleGroups(): Promise<MuscleGroup[]> {
+  const raw = await fetchList<unknown>("muscles");
+  const out: MuscleGroup[] = [];
+  for (const item of raw) {
+    if (!item || typeof item !== "object") continue;
+    const obj = item as Record<string, unknown>;
+    if (typeof obj.displayGroup !== "string") continue;
+    if (!Array.isArray(obj.muscles)) continue;
+    out.push({
+      displayGroup: obj.displayGroup,
+      muscles: obj.muscles.filter(
+        (m): m is string => typeof m === "string"
+      ),
+    });
+  }
+  return out;
+}
+
 export async function fetchEquipment(): Promise<string[]> {
   return normalizeToStrings(await fetchList("equipment"));
 }
