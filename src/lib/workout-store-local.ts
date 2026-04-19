@@ -27,9 +27,23 @@ import {
   validateWorkoutInput,
   ValidationError,
 } from "./workout-validation";
+import { EXAMPLE_WORKOUTS } from "@/data/example-workouts";
 
 export const STORAGE_KEY = "wt_workouts_v1";
+export const SEEDED_FLAG_KEY = "wt_seeded_v1";
 export const STORAGE_VERSION = 1 as const;
+
+export interface ImportFailure {
+  workoutId: string;
+  error: string;
+}
+
+export interface ImportResult {
+  imported: number;
+  skipped: number;
+  failed: number;
+  failures: ImportFailure[];
+}
 
 interface StorageShape {
   version: 1;
@@ -103,6 +117,7 @@ function newId(): string {
 
 interface SupabaseStoreLike {
   createWorkout: WorkoutStore["createWorkout"];
+  listWorkouts?: WorkoutStore["listWorkouts"];
 }
 
 export class LocalStore implements WorkoutStore {
@@ -399,11 +414,202 @@ export class LocalStore implements WorkoutStore {
     this.writeState({ ...state, sets: nextSets, workouts: nextWorkouts });
   }
 
-  async importToSupabase(
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars
-    targetStore: SupabaseStoreLike
-  ): Promise<void> {
-    throw new Error("implemented in Batch C");
+  /**
+   * Seed the three example workouts into an empty store on first use.
+   * Guarded by a localStorage flag so re-seeding never happens — even if
+   * the user deletes all examples. Idempotent; the second call is a no-op.
+   */
+  seedIfEmpty(): void {
+    let alreadySeeded = false;
+    try {
+      alreadySeeded = this.storage.getItem(SEEDED_FLAG_KEY) === "true";
+    } catch {
+      // If we cannot read the flag we would rather re-seed once than double-seed
+      // (because the zero-workouts check below still gates us).
+      alreadySeeded = false;
+    }
+    if (alreadySeeded) return;
+
+    let state: StorageShape;
+    try {
+      state = this.readStateOrEmpty();
+    } catch {
+      state = emptyState();
+    }
+    if (state.workouts.length > 0) {
+      // Non-empty store. Mark as seeded so we don't disturb user data later.
+      try {
+        this.storage.setItem(SEEDED_FLAG_KEY, "true");
+      } catch {
+        // best effort
+      }
+      return;
+    }
+
+    const timestamp = nowIso();
+    const newWorkouts: Workout[] = [];
+    const newExercises: WorkoutExercise[] = [];
+    const newSets: ExerciseSet[] = [];
+
+    for (const example of EXAMPLE_WORKOUTS) {
+      const workoutId = newId();
+      newWorkouts.push({
+        id: workoutId,
+        date: example.date,
+        name: example.name,
+        status: "planned",
+        notes: null,
+        rating: null,
+        started_at: null,
+        completed_at: null,
+        created_at: timestamp,
+        updated_at: timestamp,
+      });
+      example.exercises.forEach((ex, index) => {
+        const workoutExerciseId = newId();
+        newExercises.push({
+          id: workoutExerciseId,
+          workout_id: workoutId,
+          exercise_id: ex.exercise_id,
+          exercise_name: ex.exercise_name,
+          muscle: ex.muscle,
+          equipment: ex.equipment,
+          order_index: index,
+          notes: null,
+        });
+        for (let n = 0; n < ex.default_sets; n++) {
+          newSets.push({
+            id: newId(),
+            workout_exercise_id: workoutExerciseId,
+            set_number: n + 1,
+            weight: null,
+            weight_unit: "lbs",
+            reps: null,
+            is_completed: false,
+            completed_at: null,
+          });
+        }
+      });
+    }
+
+    try {
+      this.writeState({
+        version: STORAGE_VERSION,
+        workouts: newWorkouts,
+        exercises: newExercises,
+        sets: newSets,
+      });
+      this.storage.setItem(SEEDED_FLAG_KEY, "true");
+    } catch {
+      // If we cannot persist the seed (quota, unavailable), don't set the flag —
+      // we will try again on the next constructor. Not worth surfacing as error.
+    }
+  }
+
+  /**
+   * Import all local workouts into a signed-in SupabaseStore-compatible target.
+   *
+   * - Dedup: single listWorkouts() call up front. Skip local workouts whose
+   *   (date, name) key matches any remote workout.
+   * - Per-workout try/catch. On success the local workout is removed; on
+   *   failure it is kept and the error is captured so the UI can tell the
+   *   user some workouts remain.
+   * - If failures > 0 we throw StoreError("partial_import_failure") AFTER
+   *   all attempts complete, so the caller can still read the result from
+   *   the thrown error's attached data.
+   */
+  async importToSupabase(targetStore: SupabaseStoreLike): Promise<ImportResult> {
+    const result: ImportResult = {
+      imported: 0,
+      skipped: 0,
+      failed: 0,
+      failures: [],
+    };
+
+    let state: StorageShape;
+    try {
+      state = this.readStateOrEmpty();
+    } catch {
+      return result;
+    }
+
+    if (state.workouts.length === 0) return result;
+
+    // Build remote dedup set.
+    const remoteKeys = new Set<string>();
+    if (targetStore.listWorkouts) {
+      try {
+        const remote = await targetStore.listWorkouts();
+        for (const row of remote) {
+          remoteKeys.add(`${row.date}::${row.name ?? ""}`);
+        }
+      } catch {
+        // If listing remote fails, proceed without dedup — better to attempt
+        // import than to block the user entirely. Duplicates can be cleaned
+        // up post-hoc on the server side.
+      }
+    }
+
+    // Snapshot the workouts we plan to import before mutating storage.
+    const snapshot = [...state.workouts];
+
+    for (const workout of snapshot) {
+      const key = `${workout.date}::${workout.name ?? ""}`;
+      if (remoteKeys.has(key)) {
+        // Remote already has this (date, name); drop it locally.
+        await this.deleteWorkout(workout.id);
+        result.skipped += 1;
+        continue;
+      }
+
+      const exercises = state.exercises
+        .filter((e) => e.workout_id === workout.id)
+        .sort((a, b) => a.order_index - b.order_index);
+      const setsByExercise = new Map<string, ExerciseSet[]>();
+      for (const ex of exercises) {
+        setsByExercise.set(
+          ex.id,
+          state.sets
+            .filter((s) => s.workout_exercise_id === ex.id)
+            .sort((a, b) => a.set_number - b.set_number)
+        );
+      }
+
+      try {
+        await targetStore.createWorkout({
+          name: workout.name ?? "",
+          date: workout.date,
+          exercises: exercises.map((ex) => ({
+            exercise_id: ex.exercise_id,
+            exercise_name: ex.exercise_name,
+            muscle: ex.muscle,
+            equipment: ex.equipment,
+            default_sets: Math.max(1, setsByExercise.get(ex.id)?.length ?? 1),
+          })),
+        });
+        // Success: drop local copy.
+        await this.deleteWorkout(workout.id);
+        result.imported += 1;
+      } catch (err) {
+        result.failed += 1;
+        result.failures.push({
+          workoutId: workout.id,
+          error: err instanceof Error ? err.message : "Unknown import error",
+        });
+      }
+    }
+
+    if (result.failed > 0) {
+      throw new StoreError("server_error", {
+        message: "partial_import_failure",
+        userMessage: `Imported ${result.imported}. ${result.failed} workout${
+          result.failed === 1 ? "" : "s"
+        } couldn't be imported and are still saved locally.`,
+        cause: result,
+      });
+    }
+
+    return result;
   }
 }
 

@@ -387,12 +387,130 @@ describe("LocalStore.importToSupabase", () => {
     vi.restoreAllMocks();
   });
 
-  it("is a stub that throws until Batch C", async () => {
+  it("returns zero counts when there are no local workouts", async () => {
     const store = createLocalStore({ storage: memoryStorage() });
+    const result = await store.importToSupabase({
+      createWorkout: async () => ({ id: "x" }),
+      listWorkouts: async () => [],
+    });
+    expect(result).toEqual({ imported: 0, skipped: 0, failed: 0, failures: [] });
+  });
+
+  it("imports every local workout when the remote is empty and clears local", async () => {
+    const storage = memoryStorage();
+    const store = createLocalStore({ storage });
+    await store.createWorkout(validInput({ name: "A", date: "2026-04-10" }));
+    await store.createWorkout(validInput({ name: "B", date: "2026-04-11" }));
+
+    const calls: Array<{ name: string; date: string }> = [];
+    const result = await store.importToSupabase({
+      createWorkout: async (input) => {
+        calls.push({ name: input.name, date: input.date });
+        return { id: "remote-" + calls.length };
+      },
+      listWorkouts: async () => [],
+    });
+
+    expect(result.imported).toBe(2);
+    expect(result.skipped).toBe(0);
+    expect(result.failed).toBe(0);
+    expect(calls.map((c) => c.name).sort()).toEqual(["A", "B"]);
+    expect(await store.listWorkouts()).toEqual([]);
+  });
+
+  it("skips local workouts that already exist on the remote by (date, name)", async () => {
+    const store = createLocalStore({ storage: memoryStorage() });
+    await store.createWorkout(validInput({ name: "Push", date: "2026-04-10" }));
+    await store.createWorkout(validInput({ name: "Pull", date: "2026-04-11" }));
+
+    const created: string[] = [];
+    const result = await store.importToSupabase({
+      createWorkout: async (input) => {
+        created.push(input.name);
+        return { id: "remote" };
+      },
+      listWorkouts: async () => [
+        {
+          id: "remote-push",
+          date: "2026-04-10",
+          name: "Push",
+          status: "completed",
+          notes: null,
+          rating: null,
+          started_at: null,
+          completed_at: null,
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+          exercise_count: 0,
+        },
+      ],
+    });
+
+    expect(result.imported).toBe(1);
+    expect(result.skipped).toBe(1);
+    expect(created).toEqual(["Pull"]);
+    // The skipped one is also cleared locally (remote is source of truth).
+    expect(await store.listWorkouts()).toEqual([]);
+  });
+
+  it("keeps local workouts that fail to import and throws partial_import_failure", async () => {
+    const store = createLocalStore({ storage: memoryStorage() });
+    await store.createWorkout(validInput({ name: "OK", date: "2026-04-10" }));
+    await store.createWorkout(validInput({ name: "Boom", date: "2026-04-11" }));
+
+    let call = 0;
     await expect(
       store.importToSupabase({
-        createWorkout: async () => ({ id: "x" }),
+        createWorkout: async () => {
+          call += 1;
+          if (call === 2) throw new Error("remote down");
+          return { id: "remote-" + call };
+        },
+        listWorkouts: async () => [],
       })
-    ).rejects.toThrow(/Batch C/);
+    ).rejects.toMatchObject({ name: "StoreError", code: "server_error" });
+
+    const remaining = await store.listWorkouts();
+    expect(remaining).toHaveLength(1);
+    expect(remaining[0].name).toBe("Boom");
+  });
+});
+
+describe("LocalStore.seedIfEmpty", () => {
+  it("seeds the example workouts once on an empty store", async () => {
+    const storage = memoryStorage();
+    const store = createLocalStore({ storage });
+    store.seedIfEmpty();
+    const list = await store.listWorkouts();
+    expect(list.length).toBeGreaterThanOrEqual(3);
+    // Second call is a no-op.
+    store.seedIfEmpty();
+    const list2 = await store.listWorkouts();
+    expect(list2.length).toBe(list.length);
+  });
+
+  it("does not re-seed after the user deletes all example workouts", async () => {
+    const storage = memoryStorage();
+    const store = createLocalStore({ storage });
+    store.seedIfEmpty();
+    const list = await store.listWorkouts();
+    for (const w of list) {
+      await store.deleteWorkout(w.id);
+    }
+    expect(await store.listWorkouts()).toEqual([]);
+    // Creating a fresh wrapper around the same storage still respects the flag.
+    const nextStore = createLocalStore({ storage });
+    nextStore.seedIfEmpty();
+    expect(await nextStore.listWorkouts()).toEqual([]);
+  });
+
+  it("does not seed when the store already has user workouts", async () => {
+    const storage = memoryStorage();
+    const store = createLocalStore({ storage });
+    await store.createWorkout(validInput({ name: "Mine", date: "2026-04-01" }));
+    store.seedIfEmpty();
+    const list = await store.listWorkouts();
+    expect(list).toHaveLength(1);
+    expect(list[0].name).toBe("Mine");
   });
 });
