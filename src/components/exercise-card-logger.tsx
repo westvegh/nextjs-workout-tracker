@@ -75,11 +75,27 @@ export function ExerciseCardLogger({
     if (demo.kind === "idle") {
       setDemo({ kind: "loading" });
       try {
-        const res = await fetch(`/api/exercise-detail/${ex.exercise_id}`);
-        if (!res.ok) throw new Error(`status ${res.status}`);
+        const res = await fetch(
+          `/api/exercise-detail/${encodeURIComponent(ex.exercise_id)}`
+        );
+        // 404 = no exercise with this ID in the catalog (the workout's
+        // exercise_id doesn't match anything in exerciseapi.dev). Treat
+        // as "no video" rather than a hard error — same surface as an
+        // exercise that exists but has no video yet.
+        if (res.status === 404) {
+          setDemo({ kind: "none" });
+          return;
+        }
+        if (!res.ok) {
+          console.error(
+            `exercise-detail fetch failed for ${ex.exercise_id}: ${res.status}`
+          );
+          throw new Error(`status ${res.status}`);
+        }
         const body = (await res.json()) as { videoUrl: string | null };
         setDemo(body.videoUrl ? { kind: "ready", url: body.videoUrl } : { kind: "none" });
-      } catch {
+      } catch (err) {
+        console.error("exercise-detail fetch error", ex.exercise_id, err);
         setDemo({ kind: "error" });
       }
     }
