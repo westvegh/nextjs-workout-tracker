@@ -75,13 +75,15 @@ export interface FetchExercisesParams {
 export async function fetchExercises(
   params: FetchExercisesParams = {}
 ): Promise<ApiListResponse<ApiExercise>> {
+  // The API param for search is `q`; keep the client-facing field as `search`
+  // for readability but map it here so the URL uses `q=...`.
   const query = buildQuery({
     limit: params.limit ?? PAGE_SIZE,
     offset: params.offset ?? 0,
     muscle: params.muscle,
     equipment: params.equipment,
     category: params.category,
-    search: params.search,
+    q: params.search,
   });
   const response = await fetchWithRetry(`${BASE_URL}/exercises${query}`, {
     headers: headers(),
