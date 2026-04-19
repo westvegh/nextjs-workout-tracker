@@ -18,7 +18,7 @@ import { useState } from "react";
 import { Play, Plus, Trophy } from "lucide-react";
 import { MiniRing } from "./mini-ring";
 import { Sparkline } from "./sparkline";
-import { SetRow, type SetRowSetState } from "./set-row";
+import { SET_ROW_GRID, SetRow, type SetRowSetState } from "./set-row";
 import type { ExerciseHistory } from "@/lib/exercise-history";
 
 export interface CardExerciseState {
@@ -204,7 +204,26 @@ export function ExerciseCardLogger({
             </div>
           ) : null}
 
-          <ul className="divide-y border-t">
+          {ex.sets.length > 0 ? (
+            <div
+              className={
+                SET_ROW_GRID +
+                " border-t pt-2.5 pb-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground"
+              }
+              aria-hidden="true"
+            >
+              <span />
+              <span className="text-center">Weight</span>
+              <span />
+              <span className="text-center">Reps</span>
+              <span />
+            </div>
+          ) : null}
+          <ul
+            className={
+              "divide-y" + (ex.sets.length === 0 ? " border-t" : "")
+            }
+          >
             {ex.sets.map((s, idx) => (
               <SetRow
                 key={s.id ?? `new-${idx}`}

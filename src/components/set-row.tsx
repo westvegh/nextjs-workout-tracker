@@ -14,6 +14,12 @@
 import { Check, Trophy } from "lucide-react";
 import { SwipeDeleteRow } from "./swipe-delete-row";
 
+// Shared grid template for the set row's columns. Re-used by the column-
+// header row in ExerciseCardLogger so "WEIGHT" / "REPS" labels sit directly
+// over their inputs. Keep the two in lockstep.
+export const SET_ROW_GRID =
+  "grid grid-cols-[28px_1fr_44px_1fr_auto] items-center gap-2 px-3";
+
 export interface SetRowSetState {
   id?: string;
   set_number: number;
@@ -67,7 +73,8 @@ export function SetRow({
       <SwipeDeleteRow onDelete={onRemove}>
         <div
           className={
-            "grid grid-cols-[28px_1fr_44px_1fr_auto] items-center gap-2 px-3 py-3 sm:py-3.5 " +
+            SET_ROW_GRID +
+            " py-3 sm:py-3.5 " +
             rowBg +
             " " +
             leftAccent
