@@ -2,7 +2,7 @@
 
 Ship a workout app in 30 minutes with [exerciseapi.dev](https://exerciseapi.dev).
 
-**Live demo:** [nextjs-workout-tracker.vercel.app](https://nextjs-workout-tracker.vercel.app)
+**Live demo:** [nextjs-workout-tracker-westvegh1-4170s-projects.vercel.app](https://nextjs-workout-tracker-westvegh1-4170s-projects.vercel.app)
 
 A production-grade starter: Next.js 15 App Router, Supabase auth and database, shadcn/ui components, and 2,000+ annotated exercises from exerciseapi.dev. MIT licensed, fork it and run.
 
