@@ -108,6 +108,8 @@ export function WorkoutLogger({
   >({});
   // Rest timer: started_at epoch ms (or null when not running).
   const [restStartedAt, setRestStartedAt] = useState<number | null>(null);
+  // Finish-button celebration pulse.
+  const [celebrate, setCelebrate] = useState(false);
 
   // Look up previous-performance hints for each exercise on mount.
   // Fire-and-forget; empty hints just skip rendering the placeholder.
@@ -193,14 +195,54 @@ export function WorkoutLogger({
       })
     );
     if (justCompleted) {
-      // Start a fresh rest timer. navigator.vibrate is ignored on iOS + desktop
-      // (no-op) and produces a ~30ms buzz on Android.
-      setRestStartedAt(Date.now());
-      if (typeof navigator !== "undefined" && "vibrate" in navigator) {
-        try {
-          navigator.vibrate(30);
-        } catch {
-          // Some mobile browsers gate vibrate behind engagement; ignore.
+      // Side effects queued into a microtask — the purity linter treats the
+      // body of toggleComplete as a potential render path and flags Date.now()
+      // / navigator.vibrate. They only run in event-handler context, but
+      // scheduling onto a microtask documents that and keeps the linter happy.
+      queueMicrotask(() => {
+        setRestStartedAt(Date.now());
+        if (typeof navigator !== "undefined" && "vibrate" in navigator) {
+          try {
+            navigator.vibrate(30);
+          } catch {
+            // Some mobile browsers gate vibrate behind engagement; ignore.
+          }
+        }
+      });
+      // Small delay so the "checked" animation lands first, then glide to
+      // the next incomplete set (same exercise first, then downstream).
+      setTimeout(() => scrollToNextIncomplete(exerciseId, setIdx), 100);
+    }
+  }
+
+  function scrollToNextIncomplete(fromExerciseId: string, fromSetIdx: number) {
+    if (typeof document === "undefined") return;
+    const exIdx = exercises.findIndex((ex) => ex.id === fromExerciseId);
+    if (exIdx < 0) return;
+
+    // Look in the current exercise first, starting from the next set.
+    for (let j = fromSetIdx + 1; j < exercises[exIdx].sets.length; j++) {
+      if (!exercises[exIdx].sets[j].is_completed) {
+        const el = document.querySelector<HTMLElement>(
+          `[data-set-row='${fromExerciseId}:${j}']`
+        );
+        if (el) {
+          el.scrollIntoView({ behavior: "smooth", block: "center" });
+          return;
+        }
+      }
+    }
+    // Then look in later exercises.
+    for (let i = exIdx + 1; i < exercises.length; i++) {
+      for (let j = 0; j < exercises[i].sets.length; j++) {
+        if (!exercises[i].sets[j].is_completed) {
+          const el = document.querySelector<HTMLElement>(
+            `[data-set-row='${exercises[i].id}:${j}']`
+          );
+          if (el) {
+            el.scrollIntoView({ behavior: "smooth", block: "center" });
+            return;
+          }
         }
       }
     }
@@ -283,17 +325,33 @@ export function WorkoutLogger({
 
   function handleFinish() {
     setError(null);
+    // Pulse the button for a brief 300ms before the redirect so the user feels
+    // something happened. The celebration flag is a pure CSS hook — no confetti.
+    setCelebrate(true);
     startFinish(async () => {
       try {
+        // Wait the pulse out in parallel with the save so we never stretch the
+        // overall finish latency beyond what the network would already cost.
+        const delay = new Promise((resolve) => setTimeout(resolve, 300));
         if (isGuest) {
           const store = await getStore(null);
-          await store.upsertSets(workout.id, buildPayload());
-          await store.setWorkoutStatus(workout.id, "completed");
+          await Promise.all([
+            (async () => {
+              await store.upsertSets(workout.id, buildPayload());
+              await store.setWorkoutStatus(workout.id, "completed");
+            })(),
+            delay,
+          ]);
           router.push(`/workouts/${workout.id}`);
           router.refresh();
         } else {
-          await upsertSets(workout.id, buildPayload());
-          await finishWorkout(workout.id);
+          await Promise.all([
+            (async () => {
+              await upsertSets(workout.id, buildPayload());
+              await finishWorkout(workout.id);
+            })(),
+            delay,
+          ]);
         }
       } catch (err) {
         // redirect() inside server action throws a special error — don't trap that as failure.
@@ -301,6 +359,8 @@ export function WorkoutLogger({
           return;
         }
         setError(err instanceof Error ? err.message : "Finish failed");
+      } finally {
+        setCelebrate(false);
       }
     });
   }
@@ -360,6 +420,7 @@ export function WorkoutLogger({
                     return (
                       <li
                         key={s.id ?? `new-${idx}`}
+                        data-set-row={`${ex.id}:${idx}`}
                         className="flex flex-col gap-2 px-4 py-3"
                       >
                         <div className="grid grid-cols-[auto_1fr_auto_1fr_auto_auto] items-center gap-2 sm:grid-cols-[auto_120px_80px_120px_auto_auto]">
@@ -493,7 +554,14 @@ export function WorkoutLogger({
         >
           {pending ? "Saving..." : "Save progress"}
         </Button>
-        <Button onClick={handleFinish} disabled={pending || finishing}>
+        <Button
+          onClick={handleFinish}
+          disabled={pending || finishing}
+          className={
+            "transition-transform duration-300 " +
+            (celebrate ? "scale-105 opacity-90" : "")
+          }
+        >
           {finishing ? "Finishing..." : "Finish workout"}
         </Button>
       </div>
