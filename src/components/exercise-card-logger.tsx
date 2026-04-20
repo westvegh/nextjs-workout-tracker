@@ -256,11 +256,11 @@ export function ExerciseCardLogger({
             ))}
           </ul>
 
-          <div className="border-t p-2">
+          <div className="border-t p-1.5">
             <button
               type="button"
               onClick={onAddSet}
-              className="flex w-full items-center justify-center gap-1 rounded-md py-2 text-xs font-medium text-muted-foreground transition hover:bg-secondary hover:text-foreground"
+              className="flex h-11 w-full items-center justify-center gap-1 rounded-md text-xs font-medium text-muted-foreground transition hover:bg-secondary hover:text-foreground"
             >
               <Plus className="h-3.5 w-3.5" />
               Add set
