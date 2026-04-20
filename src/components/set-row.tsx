@@ -103,7 +103,7 @@ export function SetRow({
             disabled={set.is_completed}
             className={
               "h-12 w-full rounded-md border bg-transparent text-center font-mono text-[20px] font-semibold tracking-tight transition focus:outline-none focus:border-foreground focus:bg-card sm:h-[52px] sm:text-[22px] " +
-              (emptyWeight ? "placeholder:italic placeholder:text-muted-foreground/60 " : "") +
+              (emptyWeight ? "placeholder:text-sm placeholder:italic placeholder:font-medium placeholder:text-muted-foreground/60 " : "") +
               (set.is_completed ? "opacity-55" : "")
             }
           />
@@ -132,7 +132,7 @@ export function SetRow({
             disabled={set.is_completed}
             className={
               "h-12 w-full rounded-md border bg-transparent text-center font-mono text-[20px] font-semibold tracking-tight transition focus:outline-none focus:border-foreground focus:bg-card sm:h-[52px] sm:text-[22px] " +
-              (emptyReps ? "placeholder:italic placeholder:text-muted-foreground/60 " : "") +
+              (emptyReps ? "placeholder:text-sm placeholder:italic placeholder:font-medium placeholder:text-muted-foreground/60 " : "") +
               (set.is_completed ? "opacity-55" : "")
             }
           />
