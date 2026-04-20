@@ -515,21 +515,23 @@ export function WorkoutLogger({
 
       <FlashBadge flash={flash} />
 
-      <div className="fixed inset-x-4 bottom-4 z-10 mx-auto flex max-w-2xl flex-wrap justify-end gap-3 rounded-xl border bg-background/90 p-3 backdrop-blur sm:inset-x-6">
-        <Button
-          variant="outline"
-          onClick={handleSave}
-          disabled={pending || finishing}
-        >
-          {pending ? "Saving..." : "Save progress"}
-        </Button>
-        <Button
-          onClick={handleFinish}
-          disabled={pending || finishing}
-          className="bg-brand text-brand-foreground hover:brightness-110"
-        >
-          {finishing ? "Finishing..." : "Finish workout"}
-        </Button>
+      <div className="pointer-events-none fixed inset-x-0 bottom-4 z-10 px-4 sm:px-6">
+        <div className="pointer-events-auto mx-auto flex max-w-2xl flex-wrap justify-end gap-3 rounded-xl border bg-background/90 p-3 backdrop-blur">
+          <Button
+            variant="outline"
+            onClick={handleSave}
+            disabled={pending || finishing}
+          >
+            {pending ? "Saving..." : "Save progress"}
+          </Button>
+          <Button
+            onClick={handleFinish}
+            disabled={pending || finishing}
+            className="bg-brand text-brand-foreground hover:brightness-110"
+          >
+            {finishing ? "Finishing..." : "Finish workout"}
+          </Button>
+        </div>
       </div>
     </main>
   );

@@ -71,12 +71,14 @@ export function SessionStickyBar({
           <MiniRing size={18} stroke={2} progress={progress} />
         </span>
       </div>
-      <div className="h-0.5 w-full bg-muted">
-        <div
-          className="h-full bg-brand transition-[width] duration-400"
-          style={{ width: `${progress * 100}%` }}
-          aria-hidden="true"
-        />
+      <div className="mx-auto w-full max-w-2xl px-4 sm:px-6">
+        <div className="h-0.5 w-full bg-muted">
+          <div
+            className="h-full bg-brand transition-[width] duration-400"
+            style={{ width: `${progress * 100}%` }}
+            aria-hidden="true"
+          />
+        </div>
       </div>
     </div>
   );
