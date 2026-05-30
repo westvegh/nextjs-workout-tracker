@@ -81,6 +81,18 @@ describe("exercise-api/client", () => {
       expect(lastUrl(fetchMock)).toContain("muscle=biceps");
     });
 
+    it("passes hasVideo=true through (upstream filter, exercise-api migration 030)", async () => {
+      const fetchMock = vi.fn(async () =>
+        jsonResponse({ data: [], total: 0, limit: 100, offset: 0 })
+      );
+      setFetch(fetchMock);
+
+      const { fetchExercises } = await importClient();
+      await fetchExercises({ hasVideo: true });
+
+      expect(lastUrl(fetchMock)).toContain("hasVideo=true");
+    });
+
     it("passes limit and offset through", async () => {
       const fetchMock = vi.fn(async () =>
         jsonResponse({ data: [], total: 0, limit: 10, offset: 20 })

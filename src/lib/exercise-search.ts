@@ -3,10 +3,9 @@ import type { ApiExercise } from "./exercise-api/types";
 
 // Thin passthrough to exerciseapi.dev. The upstream /exercises endpoint
 // handles full-text search (?search=), muscle/equipment/category multi-value
-// OR-within and cross-axis AND, and muscle-display-group expansion server
-// side. This module exists mainly to (a) collapse the demo's filter types
-// into the API client's param shape and (b) apply the tiny hasVideo
-// post-filter the upstream doesn't support yet.
+// OR-within and cross-axis AND, muscle-display-group expansion, and (since
+// 2026-05-30, exercise-api migration 030) the hasVideo filter. This module
+// just collapses the demo's filter types into the API client's param shape.
 
 export interface SearchFilters {
   search?: string;
@@ -17,9 +16,8 @@ export interface SearchFilters {
 }
 
 /**
- * Search + filter. Upstream handles everything except hasVideo, which is
- * post-filtered client-side. Callers with hasVideo active should over-fetch
- * via a larger limit (see /api/list-exercises).
+ * Search + filter. Upstream handles everything, including hasVideo, so this is
+ * a one-request passthrough with an honest `total` for every filter combo.
  */
 export async function searchAndPaginate(
   filters: SearchFilters,
@@ -33,17 +31,10 @@ export async function searchAndPaginate(
     muscle: filters.muscles && filters.muscles.length > 0 ? filters.muscles : undefined,
     equipment: filters.equipment && filters.equipment.length > 0 ? filters.equipment : undefined,
     category: filters.categories && filters.categories.length > 0 ? filters.categories : undefined,
+    hasVideo: filters.hasVideo ? true : undefined,
   });
 
-  const data = filters.hasVideo
-    ? resp.data.filter((e) => e.videos && e.videos.length > 0)
-    : resp.data;
-
-  // When hasVideo is active, the `total` count from upstream doesn't reflect
-  // the post-filter. Return null so callers don't render a misleading number.
-  const total = filters.hasVideo ? null : resp.total;
-
-  return { data, total };
+  return { data: resp.data, total: resp.total };
 }
 
 /**

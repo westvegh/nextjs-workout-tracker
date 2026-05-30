@@ -18,7 +18,6 @@ import { DemoFooterCta } from "@/components/demo-footer-cta";
 export const revalidate = 60;
 
 const PAGE_SIZE = 24;
-const HAS_VIDEO_FETCH_LIMIT = 100;
 
 type SearchParams = Promise<{
   search?: string;
@@ -155,7 +154,6 @@ export default async function ExercisesPage({
             videos: hasVideoFilter,
             favorites: favoritesFilter,
           }}
-          pageFetchLimit={hasVideoFilter ? HAS_VIDEO_FETCH_LIMIT : PAGE_SIZE}
           fetchPath="/api/list-exercises"
         />
       )}
