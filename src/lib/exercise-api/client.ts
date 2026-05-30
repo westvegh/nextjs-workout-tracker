@@ -61,7 +61,7 @@ async function fetchWithRetry(
   }
 }
 
-type QueryValue = string | number | string[] | undefined;
+type QueryValue = string | number | boolean | string[] | undefined;
 
 function buildQuery(params: Record<string, QueryValue>): string {
   const parts: string[] = [];
@@ -86,6 +86,7 @@ export interface FetchExercisesParams {
   equipment?: string | string[];
   category?: string | string[];
   search?: string;
+  hasVideo?: boolean;
 }
 
 export async function fetchExercises(
@@ -102,6 +103,8 @@ export async function fetchExercises(
     equipment: params.equipment,
     category: params.category,
     search: params.search,
+    // Upstream gained ?hasVideo=true on 2026-05-30 (exercise-api migration 030).
+    hasVideo: params.hasVideo,
   });
   const response = await fetchWithRetry(`${BASE_URL}/exercises${query}`, {
     headers: headers(),

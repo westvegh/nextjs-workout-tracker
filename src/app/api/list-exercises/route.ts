@@ -2,7 +2,6 @@ import { NextResponse } from "next/server";
 import { searchAndPaginate, fetchExercisesThrough } from "@/lib/exercise-search";
 
 const PAGE_SIZE = 24;
-const HAS_VIDEO_FETCH_LIMIT = 100;
 
 /**
  * Infinite-scroll endpoint for the /exercises library. Mirrors the server
@@ -12,10 +11,10 @@ const HAS_VIDEO_FETCH_LIMIT = 100;
  * Query params:
  *   limit, offset — passthrough to the upstream exerciseapi.dev.
  *   search, muscle, equipment, category — passthrough filters.
- *   videos=1 — over-fetch + post-filter to exercises that have at least one
- *     video. The raw API lacks a has_video param.
+ *   videos=1 — maps to upstream ?hasVideo=true (exercise-api migration 030);
+ *     returns only video-backed exercises with an honest total.
  *
- * Response: { data: ApiExercise[] } — client code slices to PAGE_SIZE.
+ * Response: { data: ApiExercise[], total } — client code slices to PAGE_SIZE.
  */
 export async function GET(request: Request) {
   if (!process.env.EXERCISEAPI_KEY) {
@@ -30,11 +29,7 @@ export async function GET(request: Request) {
   const hasVideoFilter = searchParams.get("videos") === "1";
   const limit = Math.max(
     1,
-    Math.min(
-      Number(searchParams.get("limit") ?? PAGE_SIZE) ||
-        (hasVideoFilter ? HAS_VIDEO_FETCH_LIMIT : PAGE_SIZE),
-      200
-    )
+    Math.min(Number(searchParams.get("limit") ?? PAGE_SIZE) || PAGE_SIZE, 200)
   );
   const search = searchParams.get("search") ?? undefined;
   // Multi-select: client sends ?muscle=adductors&muscle=neck. getAll() handles it.
@@ -62,7 +57,7 @@ export async function GET(request: Request) {
           categories,
           hasVideo: hasVideoFilter,
         },
-        PAGE_SIZE,
+        limit,
         offset
       );
       return NextResponse.json({ data: result.data, total: result.total });

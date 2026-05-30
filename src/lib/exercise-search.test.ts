@@ -1,9 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ApiExercise } from "./exercise-api/types";
 
-// searchAndPaginate is now a thin passthrough to fetchExercises. These tests
+// searchAndPaginate is a thin passthrough to fetchExercises. These tests
 // verify URL construction (repeated params for multi-value filters), search
-// trimming, hasVideo post-filter, and pagination parameter plumbing.
+// trimming, the hasVideo passthrough (upstream filters; no client post-filter),
+// and pagination parameter plumbing.
 
 const ORIGINAL_ENV = { ...process.env };
 const ORIGINAL_FETCH = globalThis.fetch;
@@ -154,33 +155,33 @@ describe("searchAndPaginate — passthrough", () => {
     expect(calls[0].url).not.toContain("search=");
   });
 
-  it("post-filters to exercises with videos when hasVideo is true, and nulls total", async () => {
-    mockFetch(() => ({
+  it("sends hasVideo=true upstream and returns the API's rows + total verbatim (no client post-filter)", async () => {
+    const { calls } = mockFetch(() => ({
       body: {
         data: [
           exercise({ id: "1", name: "With video", videos: [{
             url: "https://cdn/x.mp4",
             format: "mp4",
-            aspectRatio: "9:16",
-            resolution: "496x864",
+            aspectRatio: "16:9",
+            resolution: "1280x720",
             durationSeconds: 5,
-            generatedWith: "m",
-            generatedAt: "2026",
           }] }),
-          exercise({ id: "2", name: "No video", videos: [] }),
-          exercise({ id: "3", name: "Also no video" }),
+          // Upstream already applied the filter, so the demo trusts the rows
+          // as-is — it must NOT re-filter client-side.
+          exercise({ id: "2", name: "Upstream-filtered row" }),
         ],
-        total: 3,
-        limit: 100,
+        total: 24,
+        limit: 24,
         offset: 0,
       },
     }));
 
     const { searchAndPaginate } = await import("./exercise-search");
-    const result = await searchAndPaginate({ hasVideo: true }, 100, 0);
+    const result = await searchAndPaginate({ hasVideo: true }, 24, 0);
 
-    expect(result.data.map((e) => e.id)).toEqual(["1"]);
-    expect(result.total).toBeNull();
+    expect(calls[0].url).toContain("hasVideo=true");
+    expect(result.data.map((e) => e.id)).toEqual(["1", "2"]);
+    expect(result.total).toBe(24);
   });
 
   it("preserves upstream total when hasVideo is not active", async () => {

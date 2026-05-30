@@ -23,9 +23,6 @@ interface ExerciseBrowserProps {
   initialExercises: ApiExercise[];
   initialTotal: number | null;
   initialFilters: ExerciseFiltersValue;
-  /** When ?videos=1 the server over-fetches the first page; this is the
-   *  fetch size the client should continue using for subsequent pages. */
-  pageFetchLimit: number;
   /** Raw URL for the client-side "load more" endpoint. Server hands this off
    *  since the exerciseapi key is server-only. */
   fetchPath: string;
@@ -38,7 +35,6 @@ export function ExerciseBrowser({
   initialExercises,
   initialTotal,
   initialFilters,
-  pageFetchLimit,
   fetchPath,
 }: ExerciseBrowserProps) {
   const router = useRouter();
@@ -95,7 +91,7 @@ export function ExerciseBrowser({
     setLoadingMore(true);
     try {
       const params = new URLSearchParams();
-      params.set("limit", String(pageFetchLimit));
+      params.set("limit", String(PAGE_SIZE));
       params.set("offset", String(offset));
       if (filters.search) params.set("search", filters.search);
       for (const m of filters.muscles) params.append("muscle", m);
@@ -127,7 +123,6 @@ export function ExerciseBrowser({
     hasMore,
     loadingMore,
     offset,
-    pageFetchLimit,
   ]);
 
   useEffect(() => {

@@ -12,8 +12,6 @@ export const revalidate = 60;
 
 const GITHUB_URL = "https://github.com/westvegh/nextjs-workout-tracker";
 const API_URL = "https://exerciseapi.dev";
-const FEATURED_PAGE_SIZE = 100;
-const FEATURED_MAX_PAGES = 25;
 const FEATURED_CARDS = 8;
 
 const FEATURES = [
@@ -49,39 +47,27 @@ const SCHEMA_TREE = `auth.users (Supabase)
                   |
                   +-- exercise_sets (set_number, weight, weight_unit, reps, is_completed)`;
 
-// Only ~8 of 2,198 exercises carry videos today, and they're scattered
-// alphabetically. The loop walks up to 25 pages of 100 to collect them, which
-// is expensive enough (2-3s cold) that we must not repeat it per request.
-// unstable_cache caches the result across all home renders on this Vercel
-// instance. The inner fetchExercises calls are individually cached too (see
-// lib/exercise-api/client.ts), so even a cold walk after cache eviction is
-// quick on the second visit. Invalidate via `revalidateTag("exerciseapi-exercises")`
-// when new videos land.
-// TODO: when upstream adds ?has_video=1, replace this walk with a single call.
+// Featured = a handful of video-backed exercises. Upstream ?hasVideo=true
+// (exercise-api migration 030, 2026-05-30) returns only those, so this is one
+// cheap call instead of the old multi-page walk. unstable_cache holds the
+// result across home renders; the "exerciseapi-exercises" tag invalidates it
+// (via revalidateTag) when new videos land. Cache key bumped to v2 so the old
+// walk's cached result is evicted on deploy.
 const loadFeaturedMovements = unstable_cache(
   async (): Promise<ApiExercise[]> => {
     if (!process.env.EXERCISEAPI_KEY) return [];
-    const found: ApiExercise[] = [];
     try {
-      for (let page = 0; page < FEATURED_MAX_PAGES; page++) {
-        const resp = await fetchExercises({
-          limit: FEATURED_PAGE_SIZE,
-          offset: page * FEATURED_PAGE_SIZE,
-        });
-        for (const ex of resp.data) {
-          if (Array.isArray(ex.videos) && ex.videos.length > 0) {
-            found.push(ex);
-            if (found.length >= FEATURED_CARDS) return found;
-          }
-        }
-        if (resp.data.length < FEATURED_PAGE_SIZE) break;
-      }
+      const resp = await fetchExercises({
+        hasVideo: true,
+        limit: FEATURED_CARDS,
+        offset: 0,
+      });
+      return resp.data;
     } catch {
-      return found;
+      return [];
     }
-    return found;
   },
-  ["featured-movements-v1"],
+  ["featured-movements-v2"],
   { revalidate: 3600, tags: ["exerciseapi-exercises"] }
 );
 
