@@ -1,0 +1,26 @@
+name: supabase-keepalive
+
+# Free-tier Supabase projects get auto-paused after 7 days without activity.
+# This demo (workouts.exerciseapi.dev) doesn't get steady traffic yet, so we
+# ping the REST endpoint every 3 days to keep it warm. The publishable key
+# below is the same one shipped in the browser bundle — not a secret.
+
+on:
+  schedule:
+    - cron: "0 12 */3 * *"
+  workflow_dispatch:
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping Supabase REST endpoint
+        run: |
+          set -euo pipefail
+          KEY="sb_publishable_CffTeN6QN1Eu2oT_ybqI2g_8164DplL"
+          URL="https://okbtgirdeufsiifoavco.supabase.co/rest/v1/profiles?select=count&limit=1"
+          status=$(curl -sS -o /dev/null -w "%{http_code}" \
+            -H "apikey: $KEY" \
+            "$URL")
+          echo "REST ping status: $status"
+          [[ "$status" == "200" ]]
